@@ -3,11 +3,11 @@ import threading
 import time
 import random
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 from flask import Flask
 
 # ================= ТОКЕН БОТА =================
-TOKEN = os.environ.get("TELEGRAM_TOKEN")  # Берем токен из настроек Render
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not TOKEN:
     print("❌ Ошибка: Не найден TELEGRAM_TOKEN!")
     exit(1)
@@ -45,6 +45,21 @@ class Game:
         self.dead_room = random.choice([1, 2, 3])
         return self.dead_room
 
+# ========== РЕГИСТРАЦИЯ КОМАНД ДЛЯ МЕНЮ ==========
+def register_commands():
+    """Регистрирует команды бота в Telegram API для отображения в меню"""
+    try:
+        commands = [
+            BotCommand("start", "🏠 Начать работу с ботом"),
+            BotCommand("start_game", "🎮 Запустить новую игру (только админ)"),
+            BotCommand("stop_game", "⏹️ Остановить активную игру (только админ)"),
+        ]
+        bot.delete_my_commands()
+        bot.set_my_commands(commands)
+        print("✅ Команды зарегистрированы в Telegram!")
+    except Exception as e:
+        print(f"⚠️ Ошибка регистрации команд: {e}")
+
 # ================= КОМАНДЫ БОТА =================
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -57,8 +72,60 @@ def send_welcome(message):
                  "• 3 комнаты, одна опасная (50% смерть)\n"
                  "• Опасная комната меняется каждый раунд\n"
                  "• На выбор — 30 секунд\n"
-                 "• В финале — Камень, ножницы, бумага до 3 побед",
+                 "• В финале — Камень, ножницы, бумага до 3 побед\n\n"
+                 "📋 **Команды:**\n"
+                 "/start_game - запустить игру (админ)\n"
+                 "/stop_game - остановить игру (админ)",
                  parse_mode="Markdown")
+
+@bot.message_handler(commands=['start_game'])
+def start_game_command(message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    
+    try:
+        admin_list = bot.get_chat_administrators(chat_id)
+        is_admin = any(admin.user.id == user_id for admin in admin_list)
+    except:
+        bot.reply_to(message, "❌ Эту команду можно использовать только в группе!")
+        return
+    
+    if not is_admin:
+        bot.reply_to(message, "❌ Только администратор чата может запустить игру!")
+        return
+    
+    if chat_id in games:
+        bot.reply_to(message, "⚠️ Игра уже запущена в этом чате!")
+        return
+    
+    msg = bot.reply_to(message, "💰 **Введите приз для победителя:**", parse_mode="Markdown")
+    bot.register_next_step_handler(msg, set_prize, chat_id, user_id)
+
+@bot.message_handler(commands=['stop_game'])
+def stop_game_command(message):
+    chat_id = message.chat.id
+    
+    if chat_id not in games:
+        bot.reply_to(message, "❌ Нет активной игры!")
+        return
+    
+    game = games[chat_id]
+    user_id = message.from_user.id
+    
+    try:
+        admin_list = bot.get_chat_administrators(chat_id)
+        is_admin = any(admin.user.id == user_id for admin in admin_list)
+    except:
+        is_admin = (user_id == game.admin_id)
+    
+    if not is_admin:
+        bot.reply_to(message, "❌ Только администратор чата может остановить игру!")
+        return
+    
+    del games[chat_id]
+    bot.reply_to(message, "⏹️ **Игра остановлена!**")
+    bot.send_message(chat_id, "▶️ Нажмите **СТАРТ** чтобы начать новую игру.",
+                     reply_markup=game_control_keyboard(), parse_mode="Markdown")
 
 def game_control_keyboard():
     markup = InlineKeyboardMarkup(row_width=2)
@@ -123,7 +190,7 @@ def admin_stop_game(call):
     
     del games[chat_id]
     bot.answer_callback_query(call.id, "⏹️ Игра остановлена!")
-    bot.send_message(chat_id, "🛑 **Игра остановлена администратором!**\n\n▶️ Нажмите **СТАРТ** чтобы начать новую.",
+    bot.send_message(chat_id, "🛑 **Игра остановлена!**\n\n▶️ Нажмите **СТАРТ** чтобы начать новую.",
                      reply_markup=game_control_keyboard(), parse_mode="Markdown")
 
 def set_prize(message, chat_id, admin_id):
@@ -374,6 +441,7 @@ def handle_rps(call):
 
 # ================= ЗАПУСК БОТА В ПОТОКЕ =================
 def run_bot():
+    register_commands()
     print("🚀 Бот запускается...")
     bot.remove_webhook()
     time.sleep(1)
