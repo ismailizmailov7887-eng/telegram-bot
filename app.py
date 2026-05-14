@@ -59,6 +59,7 @@ class Duel:
         self.current_turn = None
         self.message_id = None
 
+
 # ========== РЕГИСТРАЦИЯ КОМАНД ==========
 def register_commands():
     try:
@@ -74,6 +75,7 @@ def register_commands():
     except Exception as e:
         print(f"⚠️ Ошибка: {e}")
 
+
 # ================= КОМАНДА СТАРТ =================
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -88,6 +90,7 @@ def send_welcome(message):
                  "• Вписываете результат в кнопки 1-6\n"
                  "• Победитель — у кого сумма больше",
                  parse_mode="Markdown")
+
 
 # ================= ДУЭЛИ =================
 @bot.message_handler(commands=['duel'])
@@ -111,6 +114,7 @@ def create_duel(message):
                      f"👥 Ожидание второго игрока...\n\n"
                      f"❗ Нажмите **«ПРИСОЕДИНИТЬСЯ»**",
                      reply_markup=markup, parse_mode="Markdown")
+
 
 @bot.callback_query_handler(func=lambda call: call.data == "join_duel")
 def join_duel(call):
@@ -153,6 +157,7 @@ def join_duel(call):
                          chat_id, call.message.message_id,
                          reply_markup=markup, parse_mode="Markdown")
 
+
 @bot.callback_query_handler(func=lambda call: call.data == "start_duel")
 def start_duel(call):
     chat_id = call.message.chat.id
@@ -189,6 +194,7 @@ def start_duel(call):
                          chat_id, call.message.message_id,
                          reply_markup=markup, parse_mode="Markdown")
 
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("roll_"))
 def handle_roll(call):
     chat_id = call.message.chat.id
@@ -218,8 +224,8 @@ def handle_roll(call):
     bot.answer_callback_query(call.id, f"✅ Бросок #{duel.roll_count[user_id]}: {roll_value}")
     
     markup = InlineKeyboardMarkup(row_width=6)
-    for i in range(1, 7):
-        markup.add(InlineKeyboardButton(f"🎲 {i}", callback_data=f"roll_{i}"))
+    buttons = [InlineKeyboardButton(f"🎲 {i}", callback_data=f"roll_{i}") for i in range(1, 7)]
+    markup.add(*buttons)
     
     if duel.roll_count[user_id] >= 3:
         other_id = duel.creator_id if user_id == duel.player2_id else duel.player2_id
@@ -246,6 +252,7 @@ def handle_roll(call):
         bot.send_message(chat_id, f"🎲 **{player_name}**, бросок #{duel.roll_count[user_id]}!\n📊 Сумма: {current_sum}\nОсталось: {3 - duel.roll_count[user_id]}\n\n👇 Ваш следующий бросок:",
                          reply_markup=markup, parse_mode="Markdown")
 
+
 @bot.callback_query_handler(func=lambda call: call.data == "cancel_duel")
 def cancel_duel(call):
     chat_id = call.message.chat.id
@@ -265,6 +272,64 @@ def cancel_duel(call):
     bot.answer_callback_query(call.id, "✅ Отменено!")
     bot.edit_message_text("❌ **Дуэль отменена.**", chat_id, call.message.message_id, parse_mode="Markdown")
 
+
+# ================= ГРУППОВАЯ ИГРА =================
+@bot.message_handler(commands=['start_game'])
+def start_game_command(message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    
+    try:
+        admin_list = bot.get_chat_administrators(chat_id)
+        is_admin = any(admin.user.id == user_id for admin in admin_list)
+    except:
+        bot.reply_to(message, "❌ Эту команду можно использовать только в группе!")
+        return
+    
+    if not is_admin:
+        bot.reply_to(message, "❌ Только администратор чата может запустить игру!")
+        return
+    
+    if chat_id in games:
+        bot.reply_to(message, "⚠️ Игра уже запущена в этом чате!")
+        return
+    
+    msg = bot.reply_to(message, "💰 **Введите приз для победителя:**", parse_mode="Markdown")
+    bot.register_next_step_handler(msg, set_prize, chat_id, user_id)
+
+
+@bot.message_handler(commands=['stop_game'])
+def stop_game_command(message):
+    chat_id = message.chat.id
+    
+    if chat_id not in games:
+        bot.reply_to(message, "❌ Нет активной игры!")
+        return
+    
+    game = games[chat_id]
+    user_id = message.from_user.id
+    
+    try:
+        admin_list = bot.get_chat_administrators(chat_id)
+        is_admin = any(admin.user.id == user_id for admin in admin_list)
+    except:
+        is_admin = (user_id == game.admin_id)
+    
+    if not is_admin:
+        bot.reply_to(message, "❌ Только администратор чата может остановить игру!")
+        return
+    
+    del games[chat_id]
+    bot.reply_to(message, "⏹️ **Игра остановлена!**")
+
+
+def set_prize(message, chat_id, admin_id):
+    prize = message.text
+    games[chat_id] = Game(chat_id, prize, admin_id)
+    bot.send_message(chat_id, f"🎮 **ИГРА СОЗДАНА!**\n\n🏆 Приз: {prize}\n👥 Игроков: 0/30",
+                     parse_mode="Markdown")
+
+
 # ================= ЗАПУСК =================
 def run_bot():
     register_commands()
@@ -273,13 +338,16 @@ def run_bot():
     time.sleep(1)
     bot.infinity_polling(timeout=30, long_polling_timeout=20)
 
+
 @app.route('/')
 def home():
     return "🤖 Бот работает!", 200
 
+
 @app.route('/health')
 def health():
     return "OK", 200
+
 
 if __name__ == '__main__':
     threading.Thread(target=run_bot, daemon=True).start()
