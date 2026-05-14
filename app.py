@@ -7,7 +7,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 from flask import Flask
 
 # --- НАСТРОЙКИ ---
-TOKEN = "8598717015:AAGhbHPy-C9VTkcYb2XSyrJ3a_i83JNojf8"
+TOKEN = "8598717015:AAELFLybH7mxCCx02t23f9ufHYZI90Zolw4"
 bot = telebot.TeleBot(TOKEN, threaded=True)
 app = Flask(__name__)
 
