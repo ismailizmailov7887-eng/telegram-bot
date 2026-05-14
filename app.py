@@ -16,7 +16,8 @@ bot = telebot.TeleBot(TOKEN, threaded=True, num_threads=10)
 app = Flask(__name__)
 
 # ================= ХРАНИЛИЩЕ ИГР =================
-games = {}
+games = {}           # Групповые игры (комнаты)
+duels = {}           # Дуэли 1v1 {chat_id: duel_data}
 
 class Game:
     def __init__(self, chat_id, prize, admin_id):
@@ -45,14 +46,27 @@ class Game:
         self.dead_room = random.choice([1, 2, 3])
         return self.dead_room
 
-# ========== РЕГИСТРАЦИЯ КОМАНД ДЛЯ МЕНЮ ==========
+
+class Duel:
+    def __init__(self, creator_id, creator_name):
+        self.creator_id = creator_id
+        self.creator_name = creator_name
+        self.player2_id = None
+        self.player2_name = None
+        self.started = False
+        self.scores = {}  # {user_id: [roll1, roll2, roll3]}
+        self.current_turn = None
+        self.message_id = None
+        self.roll_count = {}  # {user_id: сколько бросков сделал}
+
+# ========== РЕГИСТРАЦИЯ КОМАНД ==========
 def register_commands():
-    """Регистрирует команды бота в Telegram API для отображения в меню"""
     try:
         commands = [
             BotCommand("start", "🏠 Начать работу с ботом"),
-            BotCommand("start_game", "🎮 Запустить новую игру (только админ)"),
-            BotCommand("stop_game", "⏹️ Остановить активную игру (только админ)"),
+            BotCommand("start_game", "🎮 Запустить групповую игру (админ)"),
+            BotCommand("stop_game", "⏹️ Остановить игру (админ)"),
+            BotCommand("duel", "🎲 Создать дуэль 1v1 (на кубиках)"),
         ]
         bot.delete_my_commands()
         bot.set_my_commands(commands)
@@ -60,22 +74,241 @@ def register_commands():
     except Exception as e:
         print(f"⚠️ Ошибка регистрации команд: {e}")
 
-# ================= КОМАНДЫ БОТА =================
+# ================= ДУЭЛИ 1v1 =================
+
+@bot.message_handler(commands=['duel'])
+def create_duel(message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    user_name = message.from_user.first_name
+    
+    # Проверяем, нет ли уже активной дуэли в этом чате
+    if chat_id in duels and duels[chat_id].started == False:
+        bot.reply_to(message, "⚠️ В этом чате уже есть открытое лобби! Присоединяйтесь командой /join")
+        return
+    
+    if chat_id in duels and duels[chat_id].started == True:
+        bot.reply_to(message, "⚠️ В этом чате уже идёт дуэль! Дождитесь окончания.")
+        return
+    
+    # Создаём новую дуэль
+    duel = Duel(user_id, user_name)
+    duels[chat_id] = duel
+    
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🎲 ПРИСОЕДИНИТЬСЯ", callback_data="join_duel"))
+    
+    bot.send_message(chat_id, f"🎲 **ДУЭЛЬ СОЗДАНА!**\n\n"
+                     f"👤 Создатель: {user_name}\n"
+                     f"👥 Ожидание второго игрока...\n\n"
+                     f"❗ Нажмите **«ПРИСОЕДИНИТЬСЯ»** чтобы участвовать!",
+                     reply_markup=markup, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data == "join_duel")
+def join_duel(call):
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    user_name = call.from_user.first_name
+    
+    if chat_id not in duels:
+        bot.answer_callback_query(call.id, "❌ Нет активной дуэли!")
+        return
+    
+    duel = duels[chat_id]
+    
+    if duel.started:
+        bot.answer_callback_query(call.id, "❌ Дуэль уже началась!")
+        return
+    
+    if user_id == duel.creator_id:
+        bot.answer_callback_query(call.id, "❌ Вы создали дуэль! Ожидайте второго игрока.")
+        return
+    
+    if duel.player2_id is not None:
+        bot.answer_callback_query(call.id, "❌ Мест уже нет!")
+        return
+    
+    # Второй игрок присоединился
+    duel.player2_id = user_id
+    duel.player2_name = user_name
+    bot.answer_callback_query(call.id, f"✅ Вы присоединились, {user_name}!")
+    
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("🎲 НАЧАТЬ ДУЭЛЬ", callback_data="start_duel"),
+        InlineKeyboardButton("❌ ОТМЕНА", callback_data="cancel_duel")
+    )
+    
+    bot.edit_message_text(f"🎲 **ДУЭЛЬ СОЗДАНА!**\n\n"
+                         f"👤 Игрок 1: {duel.creator_name}\n"
+                         f"👤 Игрок 2: {duel.player2_name}\n\n"
+                         f"✅ Оба игрока собрались!\n"
+                         f"🎯 Нажмите **«НАЧАТЬ ДУЭЛЬ»** чтобы начать игру!",
+                         chat_id, call.message.message_id,
+                         reply_markup=markup, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data == "start_duel")
+def start_duel(call):
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    
+    if chat_id not in duels:
+        bot.answer_callback_query(call.id, "❌ Нет активной дуэли!")
+        return
+    
+    duel = duels[chat_id]
+    
+    if duel.started:
+        bot.answer_callback_query(call.id, "❌ Дуэль уже началась!")
+        return
+    
+    if user_id != duel.creator_id:
+        bot.answer_callback_query(call.id, "❌ Только создатель дуэли может начать!")
+        return
+    
+    duel.started = True
+    duel.scores = {
+        duel.creator_id: [],
+        duel.player2_id: []
+    }
+    duel.roll_count = {
+        duel.creator_id: 0,
+        duel.player2_id: 0
+    }
+    duel.current_turn = duel.creator_id
+    
+    bot.answer_callback_query(call.id, "🎲 Дуэль начинается!")
+    
+    # Кнопки для ввода результата кубика (1-6)
+    markup = InlineKeyboardMarkup(row_width=6)
+    markup.add(
+        InlineKeyboardButton("🎲 1", callback_data="roll_val_1"),
+        InlineKeyboardButton("🎲 2", callback_data="roll_val_2"),
+        InlineKeyboardButton("🎲 3", callback_data="roll_val_3"),
+        InlineKeyboardButton("🎲 4", callback_data="roll_val_4"),
+        InlineKeyboardButton("🎲 5", callback_data="roll_val_5"),
+        InlineKeyboardButton("🎲 6", callback_data="roll_val_6")
+    )
+    
+    bot.edit_message_text(f"🎲 **ДУЭЛЬ НАЧАЛАСЬ!**\n\n"
+                         f"👤 {duel.creator_name} VS 👤 {duel.player2_name}\n\n"
+                         f"📋 **Правила:**\n"
+                         f"• Каждый кидает кубик 3 раза\n"
+                         f"• Впишите результат в окошко (кнопки 1-6)\n"
+                         f"• Победит тот, у кого сумма очков больше\n\n"
+                         f"🎯 **Ход {duel.creator_name}!** Введите результат вашего броска:",
+                         chat_id, call.message.message_id,
+                         reply_markup=markup, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("roll_val_"))
+def handle_roll_value(call):
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    roll_value = int(call.data.split("_")[2])
+    
+    if chat_id not in duels:
+        bot.answer_callback_query(call.id, "❌ Нет активной дуэли!")
+        return
+    
+    duel = duels[chat_id]
+    
+    if not duel.started:
+        bot.answer_callback_query(call.id, "❌ Дуэль ещё не началась!")
+        return
+    
+    if duel.current_turn != user_id:
+        bot.answer_callback_query(call.id, "❌ Сейчас не ваш ход!")
+        return
+    
+    # Сохраняем результат
+    duel.scores[user_id].append(roll_value)
+    duel.roll_count[user_id] += 1
+    current_sum = sum(duel.scores[user_id])
+    
+    bot.answer_callback_query(call.id, f"✅ Результат {roll_value} записан!")
+    
+    # Проверяем, закончил ли игрок
+    if duel.roll_count[user_id] >= 3:
+        # Переключаем ход на другого игрока
+        other_id = duel.creator_id if user_id == duel.player2_id else duel.player2_id
+        other_name = duel.creator_name if user_id == duel.player2_id else duel.player2_name
+        
+        if duel.roll_count[other_id] >= 3:
+            # Оба закончили — определяем победителя
+            determine_duel_winner(chat_id, duel)
+        else:
+            duel.current_turn = other_id
+            bot.send_message(chat_id, f"✅ **{duel.scores[user_id]['name'] if isinstance(duel.scores[user_id], dict) else 'Игрок'}** завершил броски!\n"
+                             f"📊 Сумма очков: {current_sum}\n\n"
+                             f"🎯 Теперь ход **{other_name}**! Введите результат вашего броска:",
+                             parse_mode="Markdown")
+    else:
+        # Продолжаем ход текущего игрока
+        bot.send_message(chat_id, f"🎲 **Ваш бросок #{duel.roll_count[user_id]}:** {roll_value}\n"
+                         f"📊 Текущая сумма: {current_sum}\n"
+                         f"⏰ Осталось бросков: {3 - duel.roll_count[user_id]}\n\n"
+                         f"🎯 Введите результат следующего броска:",
+                         parse_mode="Markdown")
+
+def determine_duel_winner(chat_id, duel):
+    score1 = sum(duel.scores[duel.creator_id])
+    score2 = sum(duel.scores[duel.player2_id])
+    name1 = duel.creator_name
+    name2 = duel.player2_name
+    
+    result_msg = f"🎲 **РЕЗУЛЬТАТЫ ДУЭЛИ** 🎲\n\n"
+    result_msg += f"👤 {name1}: {score1} очков\n"
+    result_msg += f"👤 {name2}: {score2} очков\n\n"
+    
+    if score1 > score2:
+        result_msg += f"🏆 **ПОБЕДИТЕЛЬ: {name1}!** 🏆"
+    elif score2 > score1:
+        result_msg += f"🏆 **ПОБЕДИТЕЛЬ: {name2}!** 🏆"
+    else:
+        result_msg += f"🤝 **НИЧЬЯ!** {score1} : {score2}"
+    
+    bot.send_message(chat_id, result_msg, parse_mode="Markdown")
+    
+    # Удаляем дуэль
+    del duels[chat_id]
+
+@bot.callback_query_handler(func=lambda call: call.data == "cancel_duel")
+def cancel_duel(call):
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    
+    if chat_id not in duels:
+        bot.answer_callback_query(call.id, "❌ Нет активной дуэли!")
+        return
+    
+    duel = duels[chat_id]
+    
+    if user_id != duel.creator_id:
+        bot.answer_callback_query(call.id, "❌ Только создатель может отменить дуэль!")
+        return
+    
+    del duels[chat_id]
+    bot.answer_callback_query(call.id, "✅ Дуэль отменена!")
+    bot.edit_message_text("❌ **Дуэль отменена.**", chat_id, call.message.message_id, parse_mode="Markdown")
+
+# ================= ГРУППОВАЯ ИГРА (КОМНАТЫ) =================
+
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     bot.reply_to(message, "🤖 Привет! Я бот для игры!\n\n"
-                 "👑 **Чтобы начать игру, админ чата должен:**\n"
-                 "1️⃣ Нажать кнопку «СТАРТ»\n"
-                 "2️⃣ Указать приз\n"
-                 "3️⃣ Дождаться участников и нажать «НАЧАТЬ ИГРУ»\n\n"
-                 "🎲 **Правила:**\n"
+                 "👑 **Команды:**\n"
+                 "• /start_game - запустить групповую игру (админ)\n"
+                 "• /stop_game - остановить игру (админ)\n"
+                 "• /duel - создать дуэль 1v1 на кубиках\n\n"
+                 "🎲 **Правила групповой игры:**\n"
                  "• 3 комнаты, одна опасная (50% смерть)\n"
                  "• Опасная комната меняется каждый раунд\n"
                  "• На выбор — 30 секунд\n"
                  "• В финале — Камень, ножницы, бумага до 3 побед\n\n"
-                 "📋 **Команды:**\n"
-                 "/start_game - запустить игру (админ)\n"
-                 "/stop_game - остановить игру (админ)",
+                 "🎯 **Правила дуэли:**\n"
+                 "• Каждый кидает кубик 3 раза\n"
+                 "• Вписываете результат в кнопки 1-6\n"
+                 "• Победитель — у кого сумма больше",
                  parse_mode="Markdown")
 
 @bot.message_handler(commands=['start_game'])
@@ -439,7 +672,7 @@ def handle_rps(call):
             bot.send_message(chat_id, f"🔜 **РАУНД {final['round']}!** Начинает {p1['name']}!")
             ask_for_choice(chat_id, game, final['player1']['id'])
 
-# ================= ЗАПУСК БОТА В ПОТОКЕ =================
+# ================= ЗАПУСК БОТА =================
 def run_bot():
     register_commands()
     print("🚀 Бот запускается...")
@@ -447,7 +680,6 @@ def run_bot():
     time.sleep(1)
     bot.infinity_polling(timeout=30, long_polling_timeout=20)
 
-# ================= ВЕБ-СЕРВЕР =================
 @app.route('/')
 def home():
     return "🤖 Бот работает!", 200
@@ -456,7 +688,6 @@ def home():
 def health():
     return "OK", 200
 
-# ================= ТОЧКА ВХОДА =================
 if __name__ == '__main__':
     threading.Thread(target=run_bot, daemon=True).start()
     port = int(os.environ.get("PORT", 5000))
