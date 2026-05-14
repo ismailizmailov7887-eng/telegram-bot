@@ -7,17 +7,17 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 from flask import Flask
 
 # --- НАСТРОЙКИ ---
-TOKEN = "8598717015:AAGhbHPy-C9VTkcYb2XSyrJ3a_i83JNojf8"# Или вставьте токен строкой "ВАШ_ТОКЕН"
+TOKEN = "8598717015:AAGhbHPy-C9VTkcYb2XSyrJ3a_i83JNojf8"
 bot = telebot.TeleBot(TOKEN, threaded=True)
 app = Flask(__name__)
 
-# Хранилища данных
+# Словари для хранения комнат (chat_id является ключом)
 games = {}
 duels = {}
 
-# --- КЛАССЫ ИГР ---
+# --- КЛАССЫ ДЛЯ ЛОГИКИ КОМНАТ ---
 
-class Game:
+class GameDoors:
     def __init__(self, chat_id, prize, admin_id):
         self.chat_id = chat_id
         self.prize = prize
@@ -37,84 +37,85 @@ class Game:
     def get_alive_players(self):
         return {uid: data for uid, data in self.players.items() if data['alive']}
 
-class Duel:
+class DuelRoom:
     def __init__(self, creator_id, creator_name, prize):
-        self.creator_id = creator_id
-        self.creator_name = creator_name
-        self.prize = prize
-        self.player2_id = None
-        self.player2_name = None
+        self.creator_id, self.creator_name, self.prize = creator_id, creator_name, prize
+        self.player2_id = self.player2_name = None
         self.started = False
         self.current_turn = None
         self.scores = {}
         self.roll_count = {}
 
-# --- ГЛАВНЫЕ КОМАНДЫ ---
+# --- ОСНОВНЫЕ КОМАНДЫ ---
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
-    text = (
-        "🎮 **ДОБРО ПОЖАЛОВАТЬ В ИГРОВОЙ БОТ!**\n\n"
-        "Доступные игры:\n"
-        "1️⃣ **3 Двери** — Выживайте, выбирая правильные двери.\n"
-        "   • `/start_game` — Запустить сбор игроков.\n"
-        "2️⃣ **Дуэль 1v1** — Соревнование на кубиках.\n"
-        "   • `/duel` — Создать вызов.\n\n"
-        "⚙️ `/stop` — Остановить любую игру в этом чате."
+    rules = (
+        "🎮 **ДОБРО ПОЖАЛОВАТЬ!**\n\n"
+        "📜 **ПРАВИЛА ИГР:**\n\n"
+        "🎲 **Дуэль 1v1:**\n"
+        "1. Создаете дуэль командой /duel.\n"
+        "2. Оппонент жмет кнопку 'Принять'.\n"
+        "3. Каждый по очереди кидает кубик (/dice) 3 раза.\n"
+        "4. Бот суммирует очки и объявляет победителя.\n\n"
+        "🚪 **3 Двери:**\n"
+        "1. Админ запускает сбор (/start_game).\n"
+        "2. Игроки вступают в группу.\n"
+        "3. В каждом раунде нужно выбрать одну из 3-х дверей.\n"
+        "4. За одной из дверей — ловушка (вылет)! Последний выживший забирает приз.\n\n"
+        "🛑 **Команды управления:**\n"
+        "/stop — Остановить все игры в этом чате."
     )
-    bot.reply_to(message, text, parse_mode="Markdown")
+    bot.reply_to(message, rules, parse_mode="Markdown")
 
 @bot.message_handler(commands=['stop', 'stop_game'])
-def stop_everything(message):
+def stop_all(message):
     cid = message.chat.id
     if cid in games: del games[cid]
     if cid in duels: del duels[cid]
-    bot.reply_to(message, "🛑 Все игры в этом чате принудительно остановлены.")
+    bot.reply_to(message, "🛑 Комната очищена. Все игры остановлены.")
 
-# --- ЛОГИКА: ИГРА 3 ДВЕРИ ---
+# --- ЛОГИКА: 3 ДВЕРИ ---
 
 @bot.message_handler(commands=['start_game'])
-def init_doors(message):
+def cmd_start_doors(message):
     cid = message.chat.id
     if cid in games: return bot.reply_to(message, "⚠️ Игра уже запущена!")
-    
-    msg = bot.send_message(cid, "🎁 Введите приз для игры '3 Двери':")
+    msg = bot.send_message(cid, "🎁 Введите название приза для игры '3 Двери':")
     bot.register_next_step_handler(msg, process_doors_prize, cid)
 
 def process_doors_prize(message, cid):
     if not message.text or message.text.startswith('/'): return
-    game = Game(cid, message.text, message.from_user.id)
-    games[cid] = game
+    games[cid] = GameDoors(cid, message.text, message.from_user.id)
     
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🚪 ВОЙТИ В ИГРУ", callback_data="join_doors"))
-    markup.add(InlineKeyboardButton("▶️ НАЧАТЬ РАУНД 1", callback_data="start_doors_round"))
+    markup.add(InlineKeyboardButton("🚪 ВСТУПИТЬ", callback_data="join_doors"))
+    markup.add(InlineKeyboardButton("▶️ НАЧАТЬ ИГРУ", callback_data="start_doors_round"))
     
-    bot.send_message(cid, f"🚪 **ИГРА: 3 ДВЕРИ**\n\n🏆 Приз: {game.prize}\n👤 Админ: {message.from_user.first_name}\n\nЖмите кнопку, чтобы вступить!", reply_markup=markup)
+    bot.send_message(cid, f"🚪 **ИГРА 3 ДВЕРИ**\n\n🏆 Приз: {message.text}\n\nНажмите кнопку ниже, чтобы вступить в игру!", reply_markup=markup)
 
 # --- ЛОГИКА: ДУЭЛЬ ---
 
 @bot.message_handler(commands=['duel'])
-def init_duel(message):
+def cmd_start_duel(message):
     cid = message.chat.id
-    if cid in duels: return bot.reply_to(message, "⚠️ Дуэль уже идет.")
-    msg = bot.send_message(cid, "💰 Введите приз для дуэли:")
+    if cid in duels: return bot.reply_to(message, "⚠️ Дуэль уже создана в этом чате.")
+    msg = bot.send_message(cid, "💰 Напишите приз дуэли:")
     bot.register_next_step_handler(msg, process_duel_prize, cid)
 
 def process_duel_prize(message, cid):
     if not message.text or message.text.startswith('/'): return
-    duel = Duel(message.from_user.id, message.from_user.first_name, message.text)
-    duels[cid] = duel
+    duels[cid] = DuelRoom(message.from_user.id, message.from_user.first_name, message.text)
     
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🎲 ПРИНЯТЬ ВЫЗОВ", callback_data="join_duel"),
                InlineKeyboardButton("❌ ОТМЕНА", callback_data="cancel_duel"))
-    bot.send_message(cid, f"🎲 **ДУЭЛЬ 1v1**\n\n👤 От: {duel.creator_name}\n🏆 Приз: {duel.prize}\n\nЖдем оппонента...", reply_markup=markup)
+    bot.send_message(cid, f"🎲 **ВЫЗОВ НА ДУЭЛЬ**\n\n👤 Создатель: {message.from_user.first_name}\n🏆 Приз: {message.text}\n\nЖдем второго игрока...", reply_markup=markup)
 
 # --- ОБРАБОТКА КНОПОК (CALLBACK) ---
 
 @bot.callback_query_handler(func=lambda call: True)
-def handle_all_callbacks(call):
+def callback_handler(call):
     cid, uid = call.message.chat.id, call.from_user.id
 
     # Вход в 3 двери
@@ -122,40 +123,36 @@ def handle_all_callbacks(call):
         if cid in games and games[cid].add_player(uid, call.from_user.first_name):
             bot.answer_callback_query(call.id, "✅ Вы в игре!")
         else:
-            bot.answer_callback_query(call.id, "Вы уже в списке или игра не найдена.")
+            bot.answer_callback_query(call.id, "❌ Вы уже вошли или игра закрыта.")
 
-    # Старт раунда 3 двери
+    # Старт раунда дверей
     elif call.data == "start_doors_round":
         game = games.get(cid)
         if not game or uid != game.admin_id: 
-            return bot.answer_callback_query(call.id, "Только админ может начать!")
+            return bot.answer_callback_query(call.id, "Только админ может запустить!")
         
         alive = game.get_alive_players()
-        if len(alive) < 1: return bot.answer_callback_query(call.id, "Нужно минимум 1 игрок!")
+        if len(alive) < 1: return bot.answer_callback_query(call.id, "Недостаточно игроков!")
         
-        game.choosing_phase = True
-        game.choices = {}
+        game.choosing_phase, game.choices = True, {}
         game.dead_door = random.randint(1, 3)
         
-        markup = InlineKeyboardMarkup()
-        markup.row(InlineKeyboardButton("🚪 1", callback_data="door_1"),
-                   InlineKeyboardButton("🚪 2", callback_data="door_2"),
-                   InlineKeyboardButton("🚪 3", callback_data="door_3"))
-        
-        bot.send_message(cid, f"🚀 **РАУНД {game.round}**\nОдна из дверей ведет к вылету!\n\nУ игроков 30 секунд на выбор...", reply_markup=markup)
-        threading.Timer(30, finish_doors_round, [cid]).start()
+        markup = InlineKeyboardMarkup().row(
+            InlineKeyboardButton("🚪 1", callback_data="door_1"),
+            InlineKeyboardButton("🚪 2", callback_data="door_2"),
+            InlineKeyboardButton("🚪 3", callback_data="door_3")
+        )
+        bot.send_message(cid, f"🚀 **РАУНД {game.round}**\nВыберите дверь! У вас 20 секунд.", reply_markup=markup)
+        threading.Timer(20.0, finish_doors_round, [cid]).start()
 
     # Выбор двери
     elif call.data.startswith("door_"):
         game = games.get(cid)
-        if not game or not game.choosing_phase: return
-        if uid not in game.get_alive_players(): return bot.answer_callback_query(call.id, "Вы не участвуете!")
-        
-        door = int(call.data.split("_")[1])
-        game.choices[uid] = door
-        bot.answer_callback_query(call.id, f"Вы выбрали дверь №{door}")
+        if game and game.choosing_phase and uid in game.get_alive_players():
+            game.choices[uid] = int(call.data.split("_")[1])
+            bot.answer_callback_query(call.id, "Выбор сделан!")
 
-    # Логика дуэли (вход/отмена)
+    # Кнопки дуэли
     elif call.data == "join_duel":
         d = duels.get(cid)
         if d and not d.started and uid != d.creator_id:
@@ -163,66 +160,63 @@ def handle_all_callbacks(call):
             d.started, d.current_turn = True, d.creator_id
             d.scores = {d.creator_id: [], uid: []}
             d.roll_count = {d.creator_id: 0, uid: 0}
-            bot.edit_message_text(f"🎲 **ДУЭЛЬ НАЧАТА!**\n\n{d.creator_name} VS {d.player2_name}\n🎯 Ходит: {d.creator_name}\nКидайте /dice!", cid, call.message.message_id)
-    
+            bot.edit_message_text(f"🎲 **ДУЭЛЬ НАЧАТА!**\n\n{d.creator_name} 🆚 {d.player2_name}\n\n🎯 Первым ходит {d.creator_name}.\nОтправьте /dice!", cid, call.message.message_id)
+
     elif call.data == "cancel_duel":
         if cid in duels and duels[cid].creator_id == uid:
             del duels[cid]
             bot.edit_message_text("❌ Дуэль отменена.", cid, call.message.message_id)
 
-# --- ЛОГИКА ЗАВЕРШЕНИЯ РАУНДА 3 ДВЕРИ ---
+# --- ЗАВЕРШЕНИЕ РАУНДА 3 ДВЕРИ ---
 
 def finish_doors_round(cid):
     game = games.get(cid)
     if not game: return
     game.choosing_phase = False
-    
     dead = game.dead_door
-    results_text = f"⌛️ **ВРЕМЯ ВЫШЛО!**\n\nСмертельная дверь была: 🚪 **{dead}**\n\n"
     
+    text = f"⌛️ **ВРЕМЯ ВЫШЛО!**\n\nСмертельная дверь была: 🚪 **{dead}**\n\n"
     for uid, data in list(game.players.items()):
         if not data['alive']: continue
         choice = game.choices.get(uid)
         if choice == dead or choice is None:
             game.players[uid]['alive'] = False
-            results_text += f"💀 {data['name']} — ВЫЛЕТ\n"
+            text += f"💀 {data['name']} — ВЫЛЕТ\n"
         else:
-            results_text += f"✅ {data['name']} — ЖИВ\n"
+            text += f"✅ {data['name']} — ЖИВ\n"
     
-    alive_now = game.get_alive_players()
-    if len(alive_now) == 0:
-        results_text += f"\n😢 Все игроки выбыли. Игра окончена!"
+    alive = game.get_alive_players()
+    if not alive:
+        text += "\nВсе проиграли! Игра окончена."
         del games[cid]
-    elif len(alive_now) == 1:
-        winner = list(alive_now.values())[0]['name']
-        results_text += f"\n🏆 **ПОБЕДИТЕЛЬ: {winner}**\nПриз: {game.prize}"
+    elif len(alive) == 1:
+        winner = list(alive.values())[0]['name']
+        text += f"\n🏆 **ПОБЕДИТЕЛЬ: {winner}**\nПриз: {game.prize}"
         del games[cid]
     else:
         game.round += 1
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("▶️ СЛЕДУЮЩИЙ РАУНД", callback_data="start_doors_round"))
-        bot.send_message(cid, results_text, reply_markup=markup)
+        markup = InlineKeyboardMarkup().add(InlineKeyboardButton("➡️ СЛЕДУЮЩИЙ РАУНД", callback_data="start_doors_round"))
+        bot.send_message(cid, text, reply_markup=markup)
         return
-
-    bot.send_message(cid, results_text)
+    bot.send_message(cid, text)
 
 # --- ЛОГИКА КУБИКОВ (ДУЭЛЬ) ---
 
 @bot.message_handler(content_types=['dice', 'text'])
-def handle_duel_action(message):
+def handle_dice_action(message):
     cid, uid = message.chat.id, message.from_user.id
     if cid not in duels: return
     d = duels[cid]
     if not d.started or d.current_turn != uid: return
 
-    is_dice = False
+    is_valid = False
     if message.dice and message.dice.emoji == "🎲":
-        val, is_dice = message.dice.value, True
+        val, is_valid = message.dice.value, True
     elif message.text and message.text.split('@')[0].lower() == '/dice':
-        msg = bot.send_dice(cid, reply_to_message_id=message.message_id)
-        val, is_dice = msg.dice.value, True
+        res = bot.send_dice(cid, reply_to_message_id=message.message_id)
+        val, is_valid = res.dice.value, True
     
-    if is_dice:
+    if is_valid:
         d.scores[uid].append(val)
         d.roll_count[uid] += 1
         time.sleep(3.5)
@@ -231,22 +225,27 @@ def handle_duel_action(message):
         if d.roll_count[uid] >= 3:
             if uid == d.creator_id:
                 d.current_turn = d.player2_id
-                bot.send_message(cid, f"🎯 Очередь {d.player2_name}!")
+                bot.send_message(cid, f"🎯 Твой ход, {d.player2_name}! Кидай /dice")
             else:
                 s1, s2 = sum(d.scores[d.creator_id]), sum(d.scores[d.player2_id])
                 res = f"🏁 **ФИНАЛ**\n{d.creator_name}: {s1}\n{d.player2_name}: {s2}\n\n"
-                res += f"🏆 Победил {d.creator_name if s1 > s2 else d.player2_name}!" if s1 != s2 else "🤝 Ничья!"
+                if s1 > s2: res += f"🏆 Победитель: {d.creator_name}!"
+                elif s2 > s1: res += f"🏆 Победитель: {d.player2_name}!"
+                else: res += "🤝 Ничья!"
                 bot.send_message(cid, res)
                 del duels[cid]
 
 # --- ЗАПУСК ---
 
+@app.route('/')
+def health(): return "OK", 200
+
 if __name__ == '__main__':
     bot.set_my_commands([
-        BotCommand("start", "Меню"),
-        BotCommand("duel", "Дуэль"),
-        BotCommand("start_game", "3 Двери"),
-        BotCommand("stop", "Остановить")
+        BotCommand("start", "Инфо/Правила"),
+        BotCommand("duel", "Создать дуэль 1v1"),
+        BotCommand("start_game", "Игра 3 Двери"),
+        BotCommand("stop", "Остановить игры")
     ])
     threading.Thread(target=lambda: bot.infinity_polling(skip_pending=True)).start()
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
