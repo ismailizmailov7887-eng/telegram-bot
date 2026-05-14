@@ -79,8 +79,8 @@ def register_commands():
 def send_welcome(message):
     bot.reply_to(message, "🤖 **Игровой бот**\n\n"
                  "🎮 **Команды:**\n"
-                 "• `/duel` - создать дуэль 1v1\n"
-                 "• `/start_game` - запустить групповую игру (админ)\n"
+                 "• `/duel` - создать дуэль 1v1 (может любой)\n"
+                 "• `/start_game` - запустить групповую игру (только админ)\n"
                  "• `/stop_game` - остановить игру (админ)\n"
                  "• `/help` - правила игры\n\n"
                  "🎲 **Кратко:**\n"
@@ -98,11 +98,13 @@ def show_rules(message):
 • После броска нажмите на кнопку с выпавшим числом (1-6)
 • Бот автоматически считает сумму ваших очков
 • **Победитель:** у кого сумма очков больше!
+• Начать дуэль может **ЛЮБОЙ** игрок
 
 🔄 **Ничья:** объявляется ничья
 
 👑 **ГРУППОВАЯ ИГРА (КОМНАТЫ):**
-• Админ запускает `/start_game` и указывает приз
+• Запустить может **ТОЛЬКО АДМИН** чата командой `/start_game`
+• Админ указывает приз
 • Игроки присоединяются кнопкой
 • Каждый раунд выбирается комната (1, 2 или 3)
 • Одна комната случайно становится **ОПАСНОЙ** (50% смерть)
@@ -119,7 +121,7 @@ def show_rules(message):
     bot.reply_to(message, rules, parse_mode="Markdown")
 
 
-# ================= ДУЭЛИ =================
+# ================= ДУЭЛИ (МОЖЕТ ЛЮБОЙ) =================
 @bot.message_handler(commands=['duel'])
 def create_duel(message):
     chat_id = message.chat.id
@@ -136,11 +138,14 @@ def create_duel(message):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🎲 ПРИСОЕДИНИТЬСЯ", callback_data="join_duel"))
     
-    bot.send_message(chat_id, f"🎲 **ДУЭЛЬ СОЗДАНА!**\n\n"
+    bot.send_message(chat_id, f"🎲 **ДУЭЛЬ**\n\n"
+                     f"📖 **ПРАВИЛА ДУЭЛИ:**\n"
+                     f"• Каждый кидает кубик 3 раза\n"
+                     f"• Нажимайте на кнопку с выпавшим числом (1-6)\n"
+                     f"• Победитель — у кого больше сумма очков!\n\n"
                      f"👤 Создатель: {user_name}\n"
                      f"👥 Ожидание второго игрока...\n\n"
-                     f"❗ Нажмите **«ПРИСОЕДИНИТЬСЯ»**\n\n"
-                     f"📖 Правила: /help",
+                     f"❗ Нажмите **«ПРИСОЕДИНИТЬСЯ»**",
                      reply_markup=markup, parse_mode="Markdown")
 
 
@@ -161,7 +166,7 @@ def join_duel(call):
         return
     
     if user_id == duel.creator_id:
-        bot.answer_callback_query(call.id, "❌ Вы создали дуэль!")
+        bot.answer_callback_query(call.id, "❌ Вы создали дуэль! Ожидайте второго игрока.")
         return
     
     if duel.player2_id is not None:
@@ -179,9 +184,10 @@ def join_duel(call):
     )
     
     bot.edit_message_text(f"🎲 **ДУЭЛЬ**\n\n"
+                         f"📖 **ПРАВИЛА:** 3 броска, сумма очков\n\n"
                          f"👤 {duel.creator_name} VS 👤 {duel.player2_name}\n\n"
                          f"✅ Оба собрались!\n"
-                         f"🎯 Нажмите **«НАЧАТЬ ДУЭЛЬ»**",
+                         f"🎯 Нажмите **«НАЧАТЬ ДУЭЛЬ»** (может любой игрок)",
                          chat_id, call.message.message_id,
                          reply_markup=markup, parse_mode="Markdown")
 
@@ -201,8 +207,9 @@ def start_duel(call):
         bot.answer_callback_query(call.id, "❌ Уже началась!")
         return
     
-    if user_id != duel.creator_id:
-        bot.answer_callback_query(call.id, "❌ Только создатель!")
+    # Может начать ЛЮБОЙ из двух игроков (создатель или присоединившийся)
+    if user_id != duel.creator_id and user_id != duel.player2_id:
+        bot.answer_callback_query(call.id, "❌ Вы не участник дуэли!")
         return
     
     duel.started = True
@@ -293,8 +300,9 @@ def cancel_duel(call):
     
     duel = duels[chat_id]
     
-    if user_id != duel.creator_id:
-        bot.answer_callback_query(call.id, "❌ Только создатель!")
+    # Отменить может любой участник (создатель или присоединившийся)
+    if user_id != duel.creator_id and user_id != duel.player2_id:
+        bot.answer_callback_query(call.id, "❌ Вы не участник дуэли!")
         return
     
     del duels[chat_id]
@@ -302,12 +310,13 @@ def cancel_duel(call):
     bot.edit_message_text("❌ **Дуэль отменена.**", chat_id, call.message.message_id, parse_mode="Markdown")
 
 
-# ================= ГРУППОВАЯ ИГРА =================
+# ================= ГРУППОВАЯ ИГРА (ТОЛЬКО АДМИНЫ) =================
 @bot.message_handler(commands=['start_game'])
 def start_game_command(message):
     chat_id = message.chat.id
     user_id = message.from_user.id
     
+    # Проверка админа
     try:
         admin_list = bot.get_chat_administrators(chat_id)
         is_admin = any(admin.user.id == user_id for admin in admin_list)
@@ -316,7 +325,7 @@ def start_game_command(message):
         return
     
     if not is_admin:
-        bot.reply_to(message, "❌ Только администратор чата может запустить игру!")
+        bot.reply_to(message, "❌ Только администратор чата может запустить групповую игру!")
         return
     
     if chat_id in games:
@@ -349,7 +358,7 @@ def stop_game_command(message):
         return
     
     del games[chat_id]
-    bot.reply_to(message, "⏹️ **Игра остановлена!**")
+    bot.reply_to(message, "⏹️ **Групповая игра остановлена!**")
 
 
 def set_prize(message, chat_id, admin_id):
@@ -363,7 +372,7 @@ def set_prize(message, chat_id, admin_id):
         InlineKeyboardButton("⏹️ СТОП", callback_data="admin_stop_game")
     )
     
-    bot.send_message(chat_id, f"🎮 **ИГРА СОЗДАНА!**\n\n🏆 Приз: {prize}\n👥 Игроков: 0/30\n\n⏰ На выбор комнаты - 20 секунд!",
+    bot.send_message(chat_id, f"🎮 **ГРУППОВАЯ ИГРА СОЗДАНА!**\n\n🏆 Приз: {prize}\n👥 Игроков: 0/30\n\n⏰ На выбор комнаты - 20 секунд!\n👑 Управлять игрой может только админ!",
                      reply_markup=markup, parse_mode="Markdown")
 
 
@@ -397,7 +406,7 @@ def join_game(call):
         InlineKeyboardButton("⏹️ СТОП", callback_data="admin_stop_game")
     )
     
-    bot.edit_message_text(f"🎮 **ИГРА СОЗДАНА!**\n\n🏆 Приз: {game.prize}\n👥 Игроков: {len(game.players)}/30\n\n⏰ На выбор комнаты - 20 секунд!",
+    bot.edit_message_text(f"🎮 **ГРУППОВАЯ ИГРА**\n\n🏆 Приз: {game.prize}\n👥 Игроков: {len(game.players)}/30\n\n⏰ На выбор комнаты - 20 секунд!\n👑 Управляет админ",
                           chat_id, call.message.message_id,
                           reply_markup=markup, parse_mode="Markdown")
 
@@ -414,6 +423,7 @@ def start_rooms(call):
     
     game = games[chat_id]
     
+    # Проверка админа (только админ может начать групповую игру)
     try:
         admin_list = bot.get_chat_administrators(chat_id)
         is_admin = any(admin.user.id == user_id for admin in admin_list)
@@ -421,14 +431,14 @@ def start_rooms(call):
         is_admin = (user_id == game.admin_id)
     
     if not is_admin:
-        bot.send_message(chat_id, "❌ Только админ может начать!")
+        bot.send_message(chat_id, "❌ Только администратор чата может начать групповую игру!")
         return
     
     if len(game.players) < 2:
         bot.send_message(chat_id, "❌ Нужно минимум 2 игрока!")
         return
     
-    bot.send_message(chat_id, f"🎮 **ИГРА НАЧИНАЕТСЯ!**\n👥 Участников: {len(game.players)}\n🏆 Приз: {game.prize}",
+    bot.send_message(chat_id, f"🎮 **ГРУППОВАЯ ИГРА НАЧИНАЕТСЯ!**\n👥 Участников: {len(game.players)}\n🏆 Приз: {game.prize}",
                      parse_mode="Markdown")
     time.sleep(2)
     start_round(chat_id, game)
@@ -657,7 +667,7 @@ def admin_stop_game(call):
     
     del games[chat_id]
     bot.answer_callback_query(call.id, "⏹️ Игра остановлена!")
-    bot.send_message(chat_id, "🛑 **Игра остановлена!**")
+    bot.send_message(chat_id, "🛑 **Групповая игра остановлена админом!**")
 
 
 # ================= ЗАПУСК =================
