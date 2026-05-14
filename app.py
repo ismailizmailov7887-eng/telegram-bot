@@ -7,13 +7,14 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 from flask import Flask
 
 # ================= ТОКЕН БОТА =================
-TOKEN = os.environ.get("8598717015:AAGhbHPy-C9VTkcYb2XSyrJ3a_i83JNojf8")
-if not TOKEN:
-    print("❌ Ошибка: Не найден TELEGRAM_TOKEN!")
-    exit(1)
+TOKEN = "8598717015:AAGhbHPy-C9VTkcYb2XSyrJ3a_i83JNojf8"
 
 bot = telebot.TeleBot(TOKEN, threaded=True, num_threads=10)
 app = Flask(__name__)
+
+# ================= ХРАНИЛИЩЕ ИГР =================
+games = {}
+duels = {}
 
 # ================= ХРАНИЛИЩЕ ИГР =================
 games = {}
