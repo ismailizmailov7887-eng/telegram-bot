@@ -16,10 +16,6 @@ app = Flask(__name__)
 games = {}
 duels = {}
 
-# ================= ХРАНИЛИЩЕ ИГР =================
-games = {}
-duels = {}
-
 class Game:
     def __init__(self, chat_id, prize, admin_id):
         self.chat_id = chat_id
@@ -66,9 +62,10 @@ def register_commands():
     try:
         commands = [
             BotCommand("start", "🏠 Начать работу с ботом"),
+            BotCommand("help", "📖 Правила игры"),
+            BotCommand("duel", "🎲 Создать дуэль 1v1"),
             BotCommand("start_game", "🎮 Запустить групповую игру (админ)"),
             BotCommand("stop_game", "⏹️ Остановить игру (админ)"),
-            BotCommand("duel", "🎲 Создать дуэль 1v1"),
         ]
         bot.delete_my_commands()
         bot.set_my_commands(commands)
@@ -77,20 +74,49 @@ def register_commands():
         print(f"⚠️ Ошибка: {e}")
 
 
-# ================= КОМАНДА СТАРТ =================
+# ================= КОМАНДЫ =================
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     bot.reply_to(message, "🤖 **Игровой бот**\n\n"
                  "🎮 **Команды:**\n"
+                 "• `/duel` - создать дуэль 1v1\n"
                  "• `/start_game` - запустить групповую игру (админ)\n"
                  "• `/stop_game` - остановить игру (админ)\n"
-                 "• `/duel` - создать дуэль 1v1 на кубиках\n\n"
-                 "🎲 **Дуэль:**\n"
-                 "• 2 игрока\n"
-                 "• Каждый кидает кубик 3 раза\n"
-                 "• Вписываете результат в кнопки 1-6\n"
-                 "• Победитель — у кого сумма больше",
+                 "• `/help` - правила игры\n\n"
+                 "🎲 **Кратко:**\n"
+                 "Дуэль — кидайте кубик 3 раза, кто наберёт больше очков — победил!",
                  parse_mode="Markdown")
+
+
+@bot.message_handler(commands=['help'])
+def show_rules(message):
+    rules = """
+📖 **ПРАВИЛА ИГРЫ** 📖
+
+🎲 **ДУЭЛЬ 1v1:**
+• Каждый игрок кидает кубик **3 раза**
+• После броска нажмите на кнопку с выпавшим числом (1-6)
+• Бот автоматически считает сумму ваших очков
+• **Победитель:** у кого сумма очков больше!
+
+🔄 **Ничья:** объявляется ничья
+
+👑 **ГРУППОВАЯ ИГРА (КОМНАТЫ):**
+• Админ запускает `/start_game` и указывает приз
+• Игроки присоединяются кнопкой
+• Каждый раунд выбирается комната (1, 2 или 3)
+• Одна комната случайно становится **ОПАСНОЙ** (50% смерть)
+• Остальные комнаты безопасные
+• Опасная комната **МЕНЯЕТСЯ** каждый раунд
+• На выбор комнаты — **20 секунд**
+• Выжившие проходят дальше
+• **ФИНАЛ:** Камень, ножницы, бумага до 3 побед
+
+🏆 **Победитель** получает приз!
+
+💡 **Вопросы?** Просто попробуй игру!
+"""
+    bot.reply_to(message, rules, parse_mode="Markdown")
 
 
 # ================= ДУЭЛИ =================
@@ -101,7 +127,7 @@ def create_duel(message):
     user_name = message.from_user.first_name
     
     if chat_id in duels:
-        bot.reply_to(message, "⚠️ В этом чате уже есть активная дуэль!")
+        bot.send_message(chat_id, "⚠️ В этом чате уже есть активная дуэль!")
         return
     
     duel = Duel(user_id, user_name)
@@ -113,7 +139,8 @@ def create_duel(message):
     bot.send_message(chat_id, f"🎲 **ДУЭЛЬ СОЗДАНА!**\n\n"
                      f"👤 Создатель: {user_name}\n"
                      f"👥 Ожидание второго игрока...\n\n"
-                     f"❗ Нажмите **«ПРИСОЕДИНИТЬСЯ»**",
+                     f"❗ Нажмите **«ПРИСОЕДИНИТЬСЯ»**\n\n"
+                     f"📖 Правила: /help",
                      reply_markup=markup, parse_mode="Markdown")
 
 
@@ -143,7 +170,7 @@ def join_duel(call):
     
     duel.player2_id = user_id
     duel.player2_name = user_name
-    bot.answer_callback_query(call.id, f"✅ Вы присоединились!")
+    bot.answer_callback_query(call.id, f"✅ {user_name}, вы присоединились!")
     
     markup = InlineKeyboardMarkup()
     markup.add(
@@ -191,6 +218,7 @@ def start_duel(call):
     
     bot.edit_message_text(f"🎲 **ДУЭЛЬ**\n\n"
                          f"👤 {duel.creator_name} VS {duel.player2_name}\n\n"
+                         f"📋 **Правила:** 3 броска, сумма очков\n\n"
                          f"🎯 **Ход {duel.creator_name}!**\n👇 Нажмите на выпавшее число:",
                          chat_id, call.message.message_id,
                          reply_markup=markup, parse_mode="Markdown")
@@ -235,7 +263,7 @@ def handle_roll(call):
         if duel.roll_count[other_id] >= 3:
             score1 = sum(duel.scores[duel.creator_id])
             score2 = sum(duel.scores[duel.player2_id])
-            result = f"🎲 **ИТОГ**\n\n👤 {duel.creator_name}: {score1}\n👤 {duel.player2_name}: {score2}\n\n"
+            result = f"🎲 **ИТОГ ДУЭЛИ**\n\n👤 {duel.creator_name}: **{score1}**\n👤 {duel.player2_name}: **{score2}**\n\n"
             if score1 > score2:
                 result += f"🏆 **ПОБЕДИТЕЛЬ: {duel.creator_name}!** 🏆"
             elif score2 > score1:
@@ -247,10 +275,10 @@ def handle_roll(call):
             return
         else:
             duel.current_turn = other_id
-            bot.send_message(chat_id, f"✅ **{player_name}** завершил! Сумма: {current_sum}\n\n🎯 **Ход {other_name}!**",
+            bot.send_message(chat_id, f"✅ **{player_name}** завершил броски!\n📊 Сумма: **{current_sum}**\n\n🎯 **Ход {other_name}!**\n👇 Нажмите на выпавшее число:",
                              reply_markup=markup, parse_mode="Markdown")
     else:
-        bot.send_message(chat_id, f"🎲 **{player_name}**, бросок #{duel.roll_count[user_id]}!\n📊 Сумма: {current_sum}\nОсталось: {3 - duel.roll_count[user_id]}\n\n👇 Ваш следующий бросок:",
+        bot.send_message(chat_id, f"🎲 **{player_name}**, бросок #{duel.roll_count[user_id]}!\n📊 Текущая сумма: **{current_sum}**\n⏰ Осталось: {3 - duel.roll_count[user_id]}\n\n👇 Ваш следующий бросок:",
                          reply_markup=markup, parse_mode="Markdown")
 
 
@@ -327,8 +355,309 @@ def stop_game_command(message):
 def set_prize(message, chat_id, admin_id):
     prize = message.text
     games[chat_id] = Game(chat_id, prize, admin_id)
-    bot.send_message(chat_id, f"🎮 **ИГРА СОЗДАНА!**\n\n🏆 Приз: {prize}\n👥 Игроков: 0/30",
+    
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🚪 ПРИСОЕДИНИТЬСЯ", callback_data="join_game"),
+        InlineKeyboardButton("▶️ НАЧАТЬ ИГРУ", callback_data="start_game_rooms"),
+        InlineKeyboardButton("⏹️ СТОП", callback_data="admin_stop_game")
+    )
+    
+    bot.send_message(chat_id, f"🎮 **ИГРА СОЗДАНА!**\n\n🏆 Приз: {prize}\n👥 Игроков: 0/30\n\n⏰ На выбор комнаты - 20 секунд!",
+                     reply_markup=markup, parse_mode="Markdown")
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "join_game")
+def join_game(call):
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    name = call.from_user.first_name
+    
+    if chat_id not in games:
+        bot.answer_callback_query(call.id, "❌ Игра не запущена!")
+        return
+    
+    game = games[chat_id]
+    
+    if user_id in game.players:
+        bot.answer_callback_query(call.id, "❌ Вы уже в игре!")
+        return
+    
+    if len(game.players) >= 30:
+        bot.answer_callback_query(call.id, "❌ Мест больше нет!")
+        return
+    
+    game.add_player(user_id, name)
+    bot.answer_callback_query(call.id, f"✅ {name}, вы присоединились!")
+    
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🚪 ПРИСОЕДИНИТЬСЯ", callback_data="join_game"),
+        InlineKeyboardButton("▶️ НАЧАТЬ ИГРУ", callback_data="start_game_rooms"),
+        InlineKeyboardButton("⏹️ СТОП", callback_data="admin_stop_game")
+    )
+    
+    bot.edit_message_text(f"🎮 **ИГРА СОЗДАНА!**\n\n🏆 Приз: {game.prize}\n👥 Игроков: {len(game.players)}/30\n\n⏰ На выбор комнаты - 20 секунд!",
+                          chat_id, call.message.message_id,
+                          reply_markup=markup, parse_mode="Markdown")
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "start_game_rooms")
+def start_rooms(call):
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    
+    bot.answer_callback_query(call.id, "✅ Игра начинается!")
+    
+    if chat_id not in games:
+        return
+    
+    game = games[chat_id]
+    
+    try:
+        admin_list = bot.get_chat_administrators(chat_id)
+        is_admin = any(admin.user.id == user_id for admin in admin_list)
+    except:
+        is_admin = (user_id == game.admin_id)
+    
+    if not is_admin:
+        bot.send_message(chat_id, "❌ Только админ может начать!")
+        return
+    
+    if len(game.players) < 2:
+        bot.send_message(chat_id, "❌ Нужно минимум 2 игрока!")
+        return
+    
+    bot.send_message(chat_id, f"🎮 **ИГРА НАЧИНАЕТСЯ!**\n👥 Участников: {len(game.players)}\n🏆 Приз: {game.prize}",
                      parse_mode="Markdown")
+    time.sleep(2)
+    start_round(chat_id, game)
+
+
+def start_round(chat_id, game):
+    game.choosing_phase = True
+    game.choices = {}
+    game.random_dead_room()
+    
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("🚪 КОМНАТА 1", callback_data="room_1"),
+        InlineKeyboardButton("🚪 КОМНАТА 2", callback_data="room_2"),
+        InlineKeyboardButton("🚪 КОМНАТА 3", callback_data="room_3")
+    )
+    
+    alive = game.get_alive_players()
+    players_text = "\n".join([f"👤 {data['name']}" for data in alive.values()])
+    
+    bot.send_message(chat_id, f"🔴 **РАУНД {game.round}**\n\n🎲 Выберите комнату!\n\n👥 Живые ({len(alive)}):\n{players_text}\n\n⏰ **20 секунд на выбор!**",
+                     reply_markup=markup, parse_mode="Markdown")
+    
+    def timer_and_process():
+        time.sleep(20)
+        if game.choosing_phase:
+            alive = game.get_alive_players()
+            for uid in alive:
+                if uid not in game.choices:
+                    game.choices[uid] = random.choice([1, 2, 3])
+            game.choosing_phase = False
+            process_round(chat_id, game)
+    
+    threading.Thread(target=timer_and_process, daemon=True).start()
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("room_"))
+def choose_room(call):
+    chat_id = call.message.chat.id
+    uid = call.from_user.id
+    room = int(call.data.split("_")[1])
+    
+    if chat_id not in games:
+        bot.answer_callback_query(call.id, "❌ Игра не найдена!")
+        return
+    
+    game = games[chat_id]
+    
+    if not game.choosing_phase:
+        bot.answer_callback_query(call.id, "⏰ Время вышло!")
+        return
+    
+    if uid in game.choices:
+        bot.answer_callback_query(call.id, "❌ Уже выбрали!")
+        return
+    
+    if uid not in game.get_alive_players():
+        bot.answer_callback_query(call.id, "❌ Вы выбыли!")
+        return
+    
+    game.choices[uid] = room
+    bot.answer_callback_query(call.id, f"✅ Комната {room}!")
+
+
+def process_round(chat_id, game):
+    room_players = {1: [], 2: [], 3: []}
+    for uid, room in game.choices.items():
+        room_players[room].append(uid)
+    
+    dead = []
+    msg = f"📊 **РЕЗУЛЬТАТЫ РАУНДА {game.round}**\n\n"
+    
+    for room in [1, 2, 3]:
+        if room_players[room]:
+            if room == game.dead_room:
+                msg += f"🚪 **КОМНАТА {room}** ⚠️ ОПАСНАЯ\n"
+                for uid in room_players[room]:
+                    if random.random() < 0.5:
+                        dead.append(uid)
+                        msg += f"   💀 {game.players[uid]['name']} → погиб\n"
+                    else:
+                        msg += f"   ✅ {game.players[uid]['name']} → выжил\n"
+            else:
+                msg += f"🚪 **КОМНАТА {room}** ✅ БЕЗОПАСНАЯ\n"
+                for uid in room_players[room]:
+                    msg += f"   ✅ {game.players[uid]['name']} → выжил\n"
+            msg += "\n"
+    
+    for uid in dead:
+        game.players[uid]['alive'] = False
+    
+    alive = game.get_alive_players()
+    msg += f"✅ **ВЫЖИЛИ ({len(alive)}):** " + ", ".join([p['name'] for p in alive.values()])
+    bot.send_message(chat_id, msg, parse_mode="Markdown")
+    
+    if len(alive) > 2:
+        game.round += 1
+        time.sleep(4)
+        bot.send_message(chat_id, f"🔜 **РАУНД {game.round}!**\nОсталось {len(alive)} участников.\n⏰ Следующий раунд через 5 секунд...")
+        time.sleep(5)
+        start_round(chat_id, game)
+    elif len(alive) == 2:
+        bot.send_message(chat_id, "🎯 **ФИНАЛ!**\nКамень, ножницы, бумага до 3 побед!")
+        time.sleep(2)
+        start_rps_final(chat_id, game, list(alive.keys()))
+    elif len(alive) == 1:
+        winner = list(alive.values())[0]['name']
+        bot.send_message(chat_id, f"🏆 **ПОБЕДИТЕЛЬ: {winner}!** 🎁 Приз: {game.prize}")
+        del games[chat_id]
+    else:
+        bot.send_message(chat_id, f"💀 Все погибли! Приз {game.prize} невостребован.")
+        del games[chat_id]
+
+
+# ================= ФИНАЛ КАМЕНЬ-НОЖНИЦЫ-БУМАГА =================
+def start_rps_final(chat_id, game, players_ids):
+    p1_id, p2_id = players_ids
+    p1_name = game.players[p1_id]['name']
+    p2_name = game.players[p2_id]['name']
+    
+    game.final_game = {
+        'player1': {'id': p1_id, 'name': p1_name, 'score': 0},
+        'player2': {'id': p2_id, 'name': p2_name, 'score': 0},
+        'round': 1,
+        'waiting_for': p1_id
+    }
+    
+    bot.send_message(chat_id, f"🎮 **ФИНАЛ: КАМЕНЬ, НОЖНИЦЫ, БУМАГА!**\n\n👤 {p1_name} VS 👤 {p2_name}\n🏆 До 3 побед!\n\n🎯 Начинает {p1_name}!")
+    ask_for_choice(chat_id, game, p1_id)
+
+
+def ask_for_choice(chat_id, game, user_id):
+    player_name = game.players[user_id]['name']
+    
+    markup = InlineKeyboardMarkup(row_width=3)
+    markup.add(
+        InlineKeyboardButton("🗿 КАМЕНЬ", callback_data="rps_rock"),
+        InlineKeyboardButton("✂️ НОЖНИЦЫ", callback_data="rps_scissors"),
+        InlineKeyboardButton("📄 БУМАГА", callback_data="rps_paper")
+    )
+    bot.send_message(chat_id, f"🎮 **{player_name}**, ваш ход! Выберите:",
+                     reply_markup=markup, parse_mode="Markdown")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rps_"))
+def handle_rps(call):
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    
+    if chat_id not in games:
+        bot.answer_callback_query(call.id, "❌ Игра не найдена!")
+        return
+    
+    game = games[chat_id]
+    final = game.final_game
+    
+    if final['waiting_for'] != user_id:
+        bot.answer_callback_query(call.id, "❌ Не ваш ход!")
+        return
+    
+    choice_map = {
+        'rps_rock': 'камень',
+        'rps_scissors': 'ножницы',
+        'rps_paper': 'бумага'
+    }
+    choice = choice_map[call.data]
+    
+    if user_id == final['player1']['id']:
+        final['player1']['choice'] = choice
+        final['waiting_for'] = final['player2']['id']
+        bot.answer_callback_query(call.id, f"✅ {choice.upper()}!")
+        ask_for_choice(chat_id, game, final['player2']['id'])
+    else:
+        final['player2']['choice'] = choice
+        bot.answer_callback_query(call.id, f"✅ {choice.upper()}!")
+        
+        p1 = final['player1']
+        p2 = final['player2']
+        
+        if p1['choice'] == p2['choice']:
+            result = "🤝 НИЧЬЯ!"
+        elif (p1['choice'] == 'камень' and p2['choice'] == 'ножницы') or \
+             (p1['choice'] == 'ножницы' and p2['choice'] == 'бумага') or \
+             (p1['choice'] == 'бумага' and p2['choice'] == 'камень'):
+            p1['score'] += 1
+            result = f"🎉 Очко получает {p1['name']}!"
+        else:
+            p2['score'] += 1
+            result = f"🎉 Очко получает {p2['name']}!"
+        
+        bot.send_message(chat_id, f"📊 **СЧЁТ:** {p1['name']} {p1['score']} : {p2['score']} {p2['name']}\n{result}", parse_mode="Markdown")
+        
+        if p1['score'] >= 3:
+            bot.send_message(chat_id, f"🏆 **ПОБЕДИТЕЛЬ ФИНАЛА: {p1['name']}!** 🎁 Приз: {game.prize}")
+            del games[chat_id]
+        elif p2['score'] >= 3:
+            bot.send_message(chat_id, f"🏆 **ПОБЕДИТЕЛЬ ФИНАЛА: {p2['name']}!** 🎁 Приз: {game.prize}")
+            del games[chat_id]
+        else:
+            final['round'] += 1
+            final['waiting_for'] = final['player1']['id']
+            time.sleep(2)
+            bot.send_message(chat_id, f"🔜 **РАУНД {final['round']}!**\nСчёт: {p1['name']} {p1['score']} : {p2['score']} {p2['name']}\nНачинает {p1['name']}!")
+            ask_for_choice(chat_id, game, final['player1']['id'])
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_stop_game")
+def admin_stop_game(call):
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    
+    try:
+        admin_list = bot.get_chat_administrators(chat_id)
+        is_admin = any(admin.user.id == user_id for admin in admin_list)
+    except:
+        bot.answer_callback_query(call.id, "❌ Только в группе!", show_alert=True)
+        return
+    
+    if not is_admin:
+        bot.answer_callback_query(call.id, "❌ Только админ!", show_alert=True)
+        return
+    
+    if chat_id not in games:
+        bot.answer_callback_query(call.id, "❌ Нет активной игры!", show_alert=True)
+        return
+    
+    del games[chat_id]
+    bot.answer_callback_query(call.id, "⏹️ Игра остановлена!")
+    bot.send_message(chat_id, "🛑 **Игра остановлена!**")
 
 
 # ================= ЗАПУСК =================
