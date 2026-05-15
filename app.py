@@ -1,5 +1,6 @@
 import os
 import telebot
+import time
 from threading import Thread
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -16,7 +17,6 @@ if not BOT_TOKEN:
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # --- ГЛОБАЛЬНОЕ ХРАНИЛИЩЕ ДЛЯ АКТИВНЫХ ДУЭЛЕЙ ---
-# Структура: { chat_id: { 'creator_id': int, 'opponent_id': int, 'creator_name': str, 'opponent_name': str, 'scores': { user_id: value } } }
 active_duels = {}
 
 # --- НАСТРОЙКА ВЕБ-СЕРВЕРА ---
@@ -126,14 +126,12 @@ def handle_callbacks(call):
             bot.answer_callback_query(call.id, text="❌ Дуэль уже кем-то принята или идет!", show_alert=True)
             return
 
-        # Получаем имя создателя из текста сообщения (или оставляем бакап)
         creator_name = "Организатор"
         if call.message.entities:
             for entity in call.message.entities:
                 if entity.type == "bold" and "Организатор" not in call.message.text[entity.offset:entity.offset+entity.length]:
                     creator_name = call.message.text[entity.offset:entity.offset+entity.length]
 
-        # Регистрируем активную дуэль
         active_duels[chat_id] = {
             'creator_id': creator_id,
             'creator_name': creator_name,
@@ -168,41 +166,33 @@ def handle_callbacks(call):
 
 
 # --- СЛЕЖКА ЗА КУБИКАМИ И СБОР РЕЗУЛЬТАТОВ ---
-# Метод ловит текстовую команду /dice ИЛИ отправку обычного эмодзи кубика (content_types=['dice', 'text'])
 @bot.message_handler(content_types=['dice', 'text'], func=lambda msg: msg.chat.id in active_duels)
 def monitor_duel_dice(message):
     chat_id = message.chat.id
     user_id = message.from_user.id
     duel = active_duels[chat_id]
 
-    # Проверяем, участвует ли этот человек в текущей дуэли
     if user_id != duel['creator_id'] and user_id != duel['opponent_id']:
         return
 
-    # Проверяем, является ли сообщение броском кубика
     is_command = message.text and message.text.lower().startswith('/dice')
     is_emoji_dice = message.dice is not None and message.dice.emoji == '🎲'
 
     if not (is_command or is_emoji_dice):
         return
 
-    # Проверяем, не кидал ли этот игрок кубик ранее
     if user_id in duel['scores']:
         bot.reply_to(message, "❌ Вы уже сделали свой бросок в этой дуэли!")
         return
 
-    # Если отправлена команда /dice, бот сам бросает кубик от имени системы для игрока
     if is_command:
         sent_dice = bot.send_dice(chat_id, emoji='🎲', reply_to_message_id=message.message_id)
         score = sent_dice.dice.value
     else:
-        # Если игрок сам кинул эмодзи-кубик, берем его значение
         score = message.dice.value
 
-    # Записываем результат игрока
     duel['scores'][user_id] = score
 
-    # Проверяем, бросили ли оба участника
     if len(duel['scores']) == 2:
         c_id, o_id = duel['creator_id'], duel['opponent_id']
         c_score = duel['scores'][c_id]
@@ -211,7 +201,6 @@ def monitor_duel_dice(message):
         c_name = duel['creator_name']
         o_name = duel['opponent_name']
 
-        # Формируем итог
         result_text = (
             f"🏆 **РЕЗУЛЬТАТЫ ДУЭЛИ** 🏆\n"
             f"───────────────────\n"
@@ -228,20 +217,29 @@ def monitor_duel_dice(message):
             result_text += "🤝 **Ничья!** Оба бойца равны по силе. Начните новую дуэль!"
 
         bot.send_message(chat_id, result_text, parse_mode="Markdown")
-        
-        # Удаляем дуэль из активных, освобождая место для следующей
         active_duels.pop(chat_id, None)
 
 
-# --- ЗАПУСК ПРОЕКТА ---
+# --- ЗАПУСК ПРОЕКТА С ЗАЩИТОЙ ОТ ПЕРЕЗАПУСКОВ ---
 if __name__ == '__main__':
-    # Фоновый Flask
+    # 1. Запуск Flask в фоне
     flask_thread = Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
     
-    print("Сброс старых подключений (Conflict 409)...")
-    bot.delete_webhook(drop_pending_updates=True)
+    # 2. Жесткий сброс старых сессий Telegram
+    print("Очистка старых соединений...")
+    try:
+        bot.delete_webhook(drop_pending_updates=True)
+        time.sleep(2)  # Даем Telegram паузу закрыть старые сессии
+    except Exception as e:
+        print(f"Предупреждение при очистке: {e}")
 
-    print("Бот успешно запущен и следит за дуэлями...")
-    bot.infinity_polling(timeout=20, long_polling_timeout=10)
+    # 3. Бесконечный цикл с автоматическим переподключением
+    print("Бот успешно запущен и защищен от падений!")
+    while True:
+        try:
+            bot.polling(none_stop=True, interval=1, timeout=20)
+        except Exception as e:
+            print(f"Ошибка пуллинга (переподключение через 5 сек): {e}")
+            time.sleep(5)
