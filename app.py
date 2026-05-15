@@ -157,6 +157,7 @@ def start_escape(message):
         'stage_round': 1,
         'chosen_doors': {},
         'rps': {},
+        'rps_scores': {}, # Будет заполнено при старте финала
         'timer_id': 0
     }
 
@@ -247,7 +248,7 @@ def process_round_results(chat_id):
     game = active_escapes[chat_id]
     
     if not game['alive']:
-        bot.send_message(chat_id, "💀 **Никто не выжил!** Все игроки погибли из-за нерешительности. Игра окончена.")
+        bot.send_message(chat_id, "💀 **Никто не выжил!** Все игроки погибли. Игра окончена.")
         active_escapes.pop(chat_id, None)
         return
 
@@ -281,12 +282,24 @@ def process_round_results(chat_id):
     )
     bot.send_message(chat_id, round_report, parse_mode="Markdown")
 
+    t = threading.Thread(target=delayed_next_stage, args=(chat_id,))
+    t.daemon = True
+    t.start()
+
+
+def delayed_next_stage(chat_id):
+    time.sleep(10)
+    if chat_id not in active_escapes: return
+    game = active_escapes[chat_id]
+
     if len(game['alive']) == 1:
         winner_name = game['players'][game['alive'][0]]
         bot.send_message(chat_id, f"👑 **ПОБЕДИТЕЛЬ ESCAPE:**\n━━━━━━━━━━━━━━━━━━━━━━\n🎉 Игрок **{winner_name}** прошел через весь ад и выжил один! 👑", parse_mode="Markdown")
         active_escapes.pop(chat_id, None)
-    elif len(game['alive']) == 2:
+    elif len(game['alive']) == 2 and game['stage_round'] >= 3:
         game['status'] = 'rps_final'
+        # Инициализируем счет КНБ нулями
+        game['rps_scores'] = {game['alive'][0]: 0, game['alive'][1]: 0}
         send_rps_stage(chat_id)
     else:
         game['stage_round'] += 1
@@ -305,16 +318,20 @@ def send_rps_stage(chat_id):
     )
     markup_rps.add(InlineKeyboardButton("📄 Бумага", callback_data="rps_paper"))
     
-    p1_name = game['players'][game['alive'][0]]
-    p2_name = game['players'][game['alive'][1]]
+    p1_id, p2_id = game['alive'][0], game['alive'][1]
+    p1_name = game['players'][p1_id]
+    p2_name = game['players'][p2_id]
+    
+    s1 = game['rps_scores'].get(p1_id, 0)
+    s2 = game['rps_scores'].get(p2_id, 0)
     
     bot.send_message(
         chat_id, 
-        f"🏆 **ФИНАЛ КНБ** 🏆\n"
+        f"🏆 **ФИНАЛ КНБ (ДО 3 ПОБЕД)** 🏆\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💥 **{p1_name}**  vs  **{p2_name}**\n"
+        f"💥 **{p1_name}** [{s1}]  vs  [{s2}] **{p2_name}**\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"Осталось только двое! Выберите свое оружие для финального удара 👇", 
+        f"Выбирите оружие для следующего столкновения 👇", 
         reply_markup=markup_rps,
         parse_mode="Markdown"
     )
@@ -353,7 +370,6 @@ def handle_callbacks(call):
         )
 
     elif call.data == "stop_duel":
-        # Убрана проверка на админа: теперь КНОПКУ отмены дуэли может нажать любой желающий
         active_duels.pop(chat_id, None)
         bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="🛑 Дуэль успешно отменена участником чата.", reply_markup=None)
 
@@ -450,7 +466,7 @@ def handle_callbacks(call):
             translations = {'rock': '🪨 Камень', 'scissors': '✂️ Ножницы', 'paper': '📄 Бумага'}
 
             res = (
-                f"🏁 **ИТОГИ ФИНАЛЬНОГО БОЯ** 🏁\n"
+                f"🏁 **РАУНД ФИНАЛЬНОГО БОЯ** 🏁\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"👤 {n1}: **{translations[c1]}**\n"
                 f"👤 {n2}: **{translations[c2]}**\n"
@@ -458,17 +474,32 @@ def handle_callbacks(call):
             )
             
             if c1 == c2:
-                res += "🤝 **Ничья! Снаряды столкнулись в воздухе. Переигровка!**"
+                res += "🤝 **Ничья в раунде! Очки никому не начисляются.**"
                 bot.send_message(chat_id, res, parse_mode="Markdown")
-                send_rps_stage(chat_id) 
             elif (c1=='rock' and c2=='scissors') or (c1=='scissors' and c2=='paper') or (c1=='paper' and c2=='rock'):
-                res += f"👑 **ПОБЕДИТЕЛЬ ESCAPE:** **{n1}** 🎉"
+                game['rps_scores'][p1_id] += 1
+                res += f"🎯 В этом раунде побеждает **{n1}**!"
                 bot.send_message(chat_id, res, parse_mode="Markdown")
+            else:
+                game['rps_scores'][p2_id] += 1
+                res += f"🎯 В этом раунде побеждает **{n2}**!"
+                bot.send_message(chat_id, res, parse_mode="Markdown")
+
+            # Проверяем, набрал ли кто-то 3 очка
+            s1 = game['rps_scores'][p1_id]
+            s2 = game['rps_scores'][p2_id]
+
+            if s1 >= 3:
+                bot.send_message(chat_id, f"🏆 **АБСОЛЮТНЫЙ ЧЕМПИОН ESCAPE** 🏆\n━━━━━━━━━━━━━━━━━━━━━━\n🎉 Игрок **{n1}** одержал 3 победы в КНБ и выигрывает марафон! 🎉", parse_mode="Markdown")
+                active_escapes.pop(chat_id, None)
+            elif s2 >= 3:
+                bot.send_message(chat_id, f"🏆 **АБСОЛЮТНЫЙ ЧЕМПИОН ESCAPE** 🏆\n━━━━━━━━━━━━━━━━━━━━━━\n🎉 Игрок **{n2}** одержал 3 победы в КНБ и выигрывает марафон! 🎉", parse_mode="Markdown")
                 active_escapes.pop(chat_id, None)
             else:
-                res += f"👑 **ПОБЕДИТЕЛЬ ESCAPE:** **{n2}** 🎉"
-                bot.send_message(chat_id, res, parse_mode="Markdown")
-                active_escapes.pop(chat_id, None)
+                # Играем дальше до 3 побед с задержкой
+                t = threading.Thread(target=lambda: (time.sleep(3), send_rps_stage(chat_id)))
+                t.daemon = True
+                t.start()
 
 
 # =====================================================================
