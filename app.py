@@ -157,20 +157,22 @@ def start_escape(message):
         'stage_round': 1,
         'chosen_doors': {},
         'rps': {},
-        'rps_scores': {}, # Будет заполнено при старте финала
+        'rps_scores': {},
         'timer_id': 0
     }
 
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🏃‍♂️ Участвовать", callback_data="join_escape"))
+    markup.add(InlineKeyboardButton("🏃‍♂️ Присоединиться", callback_data="join_escape"))
     markup.add(InlineKeyboardButton("🚀 Начать игру", callback_data="run_escape"), 
                InlineKeyboardButton("🛑 Отменить игру", callback_data="stop_escape"))
 
     text = (
-        f"🏃‍♂️ **РЕГИСТРАЦИЯ НА ИГРУ ESCAPE** 🏃‍♂️\n"
+        f"🎮 **ИГРА СОЗДАНА!**\n\n"
+        f"🏆 Приз: **тоны**\n"
+        f"👥 Игроков: **1 / 30**\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👥 Собрано игроков: 1\n"
-        f"📝 Список:\n• {message.from_user.first_name}\n"
+        f"👤 **Список участников:**\n"
+        f"👤 {message.from_user.first_name}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"👑 Администратор, нажмите «Начать игру», когда все соберутся!"
     )
@@ -181,22 +183,23 @@ def send_door_stage(chat_id, message_id=None):
     if chat_id not in active_escapes: return
     game = active_escapes[chat_id]
     game['chosen_doors'] = {}  
-    alive_names = [game['players'][uid] for uid in game['alive']]
+    
+    # Формируем красивый вертикальный список живых игроков
+    alive_list_text = "\n".join([f"👤 {game['players'][uid]}" for uid in game['alive']])
     
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("🚪 Дверь 1", callback_data="choose_door_1"),
-        InlineKeyboardButton("🚪 Дверь 2", callback_data="choose_door_2"),
-        InlineKeyboardButton("🚪 Дверь 3", callback_data="choose_door_3")
+        InlineKeyboardButton("🚪 Комната 1", callback_data="choose_door_1"),
+        InlineKeyboardButton("🚪 Комната 2", callback_data="choose_door_2"),
+        InlineKeyboardButton("🚪 Комната 3", callback_data="choose_door_3")
     )
 
     text = (
-        f"🚪 **ESCAPE — РАУНД {game['stage_round']}** 🚪\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👥 Оставшиеся в живых ({len(game['alive'])}):\n"
-        f"🔥 {', '.join(alive_names)}\n\n"
-        f"⚡️ Каждую секунду ловушка меняет свое местоположение!\n"
-        f"⏳ **У вас ровно 10 секунд на выбор двери!** 👇"
+        f"🔴 **РАУНД {game['stage_round']}**\n\n"
+        f"🎲 **Выберите комнату!**\n\n"
+        f"👥 Живые ({len(game['alive'])}):\n"
+        f"{alive_list_text}\n\n"
+        f"⏰ **30 секунд!**"
     )
     
     if message_id:
@@ -216,13 +219,14 @@ def send_door_stage(chat_id, message_id=None):
     game['timer_id'] += 1
     current_timer_id = game['timer_id']
     
+    # Таймер на 30 секунд
     t = threading.Thread(target=door_timeout, args=(chat_id, game['stage_round'], current_timer_id))
     t.daemon = True
     t.start()
 
 
 def door_timeout(chat_id, round_num, timer_id):
-    time.sleep(10)
+    time.sleep(30)
     if chat_id not in active_escapes: return
     game = active_escapes[chat_id]
     
@@ -237,7 +241,7 @@ def door_timeout(chat_id, round_num, timer_id):
             
     if dead_by_timeout:
         try:
-            bot.send_message(chat_id, f"⏱ **ВРЕМЯ ИСТЕКЛО!**\n⚰️ Игроки: *{', '.join(dead_by_timeout)}* не успели сделать выбор и превратились в пыль.", parse_mode="Markdown")
+            bot.send_message(chat_id, f"⏱ **ВРЕМЯ ИСТЕКЛО!**\n⚰️ Игроки: *{', '.join(dead_by_timeout)}* не успели выбрать комнату и выбывают.", parse_mode="Markdown")
         except Exception: pass
         
     process_round_results(chat_id)
@@ -248,37 +252,57 @@ def process_round_results(chat_id):
     game = active_escapes[chat_id]
     
     if not game['alive']:
-        bot.send_message(chat_id, "💀 **Никто не выжил!** Все игроки погибли. Игра окончена.")
+        bot.send_message(chat_id, "💀 **Никто не выжил!** Ловушки поглотили всех игроков. Игра окончена.")
         active_escapes.pop(chat_id, None)
         return
 
+    # Выбираем смертельную комнату (65% шанс гибели внутри неё)
     death_door = random.choice([1, 2, 3])
+    
+    # Списки для красивого отображения итогов по комнатам
+    room_players = {1: [], 2: [], 3: []}
     next_alive = []
     dead_this_round = []
 
     for uid in game['alive']:
-        if game['chosen_doors'].get(uid) == death_door:
+        chosen = game['chosen_doors'].get(uid, 1) # Если вдруг не выбрал, по дефолту 1
+        
+        if chosen == death_door:
             if random.random() < 0.65:
-                dead_this_round.append(game['players'][uid])
+                dead_this_round.append(uid)
+                room_players[chosen].append(f"   💀 {game['players'][uid]} → погиб")
             else:
                 next_alive.append(uid)
+                room_players[chosen].append(f"   ✅ {game['players'][uid]} → выжил")
         else:
             next_alive.append(uid)
+            room_players[chosen].append(f"   ✅ {game['players'][uid]} → выжил")
 
-    if not next_alive:
+    # Если ловушка убила абсолютно всех, даем шанс на спасение (чтобы игра не ломалась)
+    if not next_alive and game['alive']:
         next_alive = game['alive'].copy()
         dead_this_round = []
-        bot.send_message(chat_id, f"⚠️ Ловушка захлопнулась в двери **{death_door}**, но боги пощадили вас! Все выжили, продолжаем марафон.")
+        room_players = {1: [], 2: [], 3: []}
+        for uid in game['alive']:
+            chosen = game['chosen_doors'].get(uid, 1)
+            room_players[chosen].append(f"   ✅ {game['players'][uid]} → выжил")
 
     game['alive'] = next_alive
-    dead_text = ", ".join(dead_this_round) if dead_this_round else "Никто"
-    
+
+    # Формируем строки для каждой комнаты
+    r1_text = "\n".join(room_players[1]) if room_players[1] else "   *Пусто*"
+    r2_text = "\n".join(room_players[2]) if room_players[2] else "   *Пусто*"
+    r3_text = "\n".join(room_players[3]) if room_players[3] else "   *Пусто*"
+
+    alive_names = [game['players'][uid] for uid in game['alive']]
+    alive_footer = ", ".join(alive_names) if alive_names else "Никто"
+
     round_report = (
-        f"📊 **ИТОГИ РАУНДА {game['stage_round']}**\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💀 Ловушка находилась в: **Комнате №{death_door}**\n"
-        f"⚰️ Погибли в этом раунде: *{dead_text}*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━"
+        f"📊 **РЕЗУЛЬТАТЫ РАУНДА {game['stage_round']}**\n\n"
+        f"🚪 **КОМНАТА 1**\n{r1_text}\n\n"
+        f"🚪 **КОМНАТА 2**\n{r2_text}\n\n"
+        f"🚪 **КОМНАТА 3**\n{r3_text}\n\n"
+        f"✅ **ВЫЖИЛИ:** {alive_footer}"
     )
     bot.send_message(chat_id, round_report, parse_mode="Markdown")
 
@@ -288,22 +312,29 @@ def process_round_results(chat_id):
 
 
 def delayed_next_stage(chat_id):
-    time.sleep(10)
     if chat_id not in active_escapes: return
     game = active_escapes[chat_id]
 
+    # Если остался 1 или 2 игрока — двигаемся к финишу
     if len(game['alive']) == 1:
+        time.sleep(3)
         winner_name = game['players'][game['alive'][0]]
-        bot.send_message(chat_id, f"👑 **ПОБЕДИТЕЛЬ ESCAPE:**\n━━━━━━━━━━━━━━━━━━━━━━\n🎉 Игрок **{winner_name}** прошел через весь ад и выжил один! 👑", parse_mode="Markdown")
+        bot.send_message(chat_id, f"🏆 **АБСОЛЮТНЫЙ ЧЕМПИОН ESCAPE** 🏆\n━━━━━━━━━━━━━━━━━━━━━━\n🎉 Игрок **{winner_name}** прошел через весь ад и выжил один! 👑", parse_mode="Markdown")
         active_escapes.pop(chat_id, None)
-    elif len(game['alive']) == 2 and game['stage_round'] >= 3:
+    elif len(game['alive']) == 2:
+        time.sleep(3)
         game['status'] = 'rps_final'
-        # Инициализируем счет КНБ нулями
         game['rps_scores'] = {game['alive'][0]: 0, game['alive'][1]: 0}
         send_rps_stage(chat_id)
     else:
-        game['stage_round'] += 1
-        send_door_stage(chat_id)
+        # Анонс следующего раунда через 5 секунд в стиле твоего примера
+        next_r = game['stage_round'] + 1
+        bot.send_message(chat_id, f"🔜 **РАУНД {next_r}!** Осталось {len(game['alive'])} участников. Через 5 секунд...", parse_mode="Markdown")
+        
+        time.sleep(5)
+        if chat_id in active_escapes:
+            game['stage_round'] = next_r
+            send_door_stage(chat_id)
 
 
 def send_rps_stage(chat_id):
@@ -331,7 +362,7 @@ def send_rps_stage(chat_id):
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💥 **{p1_name}** [{s1}]  vs  [{s2}] **{p2_name}**\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"Выбирите оружие для следующего столкновения 👇", 
+        f"Выберите свое оружие для финального удара 👇", 
         reply_markup=markup_rps,
         parse_mode="Markdown"
     )
@@ -382,20 +413,23 @@ def handle_callbacks(call):
         if user_id in game['players']:
             bot.answer_callback_query(call.id, "Вы уже в игре!", show_alert=True)
             return
+        if len(game['players']) >= 30:
+            bot.answer_callback_query(call.id, "Лобби уже заполнено! (Макс. 30)", show_alert=True)
+            return
 
         game['players'][user_id] = user_name
         bot.answer_callback_query(call.id, "Вы добавлены!")
 
-        player_list = "\n".join([f"• {name}" for name in game['players'].values()])
+        player_list = "\n".join([f"👤 {name}" for name in game['players'].values()])
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🏃‍♂️ Участвовать", callback_data="join_escape"))
+        markup.add(InlineKeyboardButton("🏃‍♂️ Присоединиться", callback_data="join_escape"))
         markup.add(InlineKeyboardButton("🚀 Начать игру", callback_data="run_escape"), 
                    InlineKeyboardButton("🛑 Отменить игру", callback_data="stop_escape"))
 
         bot.edit_message_text(
             chat_id=chat_id, 
             message_id=call.message.message_id, 
-            text=f"🏃‍♂️ **РЕГИСТРАЦИЯ НА ИГРУ ESCAPE** 🏃‍♂️\n━━━━━━━━━━━━━━━━━━━━━━\n👥 Собрано: {len(game['players'])}\n📝 Список:\n{player_list}", 
+            text=f"🎮 **ИГРА СОЗДАНА!**\n\n🏆 Приз: **тоны**\n👥 Игроков: **{len(game['players'])} / 30**\n━━━━━━━━━━━━━━━━━━━━━━\n👤 **Список участников:**\n{player_list}\n━━━━━━━━━━━━━━━━━━━━━━\n👑 Администратор, нажмите «Начать игру», когда все соберутся!", 
             parse_mode="Markdown", 
             reply_markup=markup
         )
@@ -410,12 +444,12 @@ def handle_callbacks(call):
             
         if game['status'] != 'registration': return
         if len(game['players']) < 2:
-            bot.answer_callback_query(call.id, "❌ Нужно хотя бы 2 человека!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Нужно хотя бы 2 человека для старта!", show_alert=True)
             return
         
         game['status'] = 'playing'
         game['alive'] = list(game['players'].keys())
-        bot.answer_callback_query(call.id, "Игра стартует!")
+        bot.answer_callback_query(call.id, "Марафон запущен!")
         send_door_stage(chat_id, call.message.message_id)
 
     elif call.data == "stop_escape":
@@ -433,12 +467,12 @@ def handle_callbacks(call):
             bot.answer_callback_query(call.id, "❌ Вы не участвуете или уже погибли!", show_alert=True)
             return
         if user_id in game['chosen_doors']:
-            bot.answer_callback_query(call.id, "❌ Вы уже выбрали дверь!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Вы уже выбрали комнату!", show_alert=True)
             return
 
         door_num = int(call.data.split("_")[2])
         game['chosen_doors'][user_id] = door_num
-        bot.answer_callback_query(call.id, f"Вы зашли в дверь №{door_num}")
+        bot.answer_callback_query(call.id, f"Вы зашли в Комнату №{door_num}")
 
         if len(game['chosen_doors']) == len(game['alive']):
             process_round_results(chat_id)
@@ -466,7 +500,7 @@ def handle_callbacks(call):
             translations = {'rock': '🪨 Камень', 'scissors': '✂️ Ножницы', 'paper': '📄 Бумага'}
 
             res = (
-                f"🏁 **РАУНД ФИНАЛЬНОГО БОЯ** 🏁\n"
+                f"🏁 **РАУНД ФИНАЛЬНОГО БОЯ КНБ** 🏁\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"👤 {n1}: **{translations[c1]}**\n"
                 f"👤 {n2}: **{translations[c2]}**\n"
@@ -474,7 +508,7 @@ def handle_callbacks(call):
             )
             
             if c1 == c2:
-                res += "🤝 **Ничья в раунде! Очки никому не начисляются.**"
+                res += "🤝 **Ничья в раунде! Переигровка столкновения.**"
                 bot.send_message(chat_id, res, parse_mode="Markdown")
             elif (c1=='rock' and c2=='scissors') or (c1=='scissors' and c2=='paper') or (c1=='paper' and c2=='rock'):
                 game['rps_scores'][p1_id] += 1
@@ -485,18 +519,16 @@ def handle_callbacks(call):
                 res += f"🎯 В этом раунде побеждает **{n2}**!"
                 bot.send_message(chat_id, res, parse_mode="Markdown")
 
-            # Проверяем, набрал ли кто-то 3 очка
             s1 = game['rps_scores'][p1_id]
             s2 = game['rps_scores'][p2_id]
 
             if s1 >= 3:
-                bot.send_message(chat_id, f"🏆 **АБСОЛЮТНЫЙ ЧЕМПИОН ESCAPE** 🏆\n━━━━━━━━━━━━━━━━━━━━━━\n🎉 Игрок **{n1}** одержал 3 победы в КНБ и выигрывает марафон! 🎉", parse_mode="Markdown")
+                bot.send_message(chat_id, f"🏆 **АБСОЛЮТНЫЙ ЧЕМПИОН ESCAPE** 🏆\n━━━━━━━━━━━━━━━━━━━━━━\n🎉 Игрок **{n1}** одержал 3 победы в КНБ и забирает главный приз! 🎉", parse_mode="Markdown")
                 active_escapes.pop(chat_id, None)
             elif s2 >= 3:
-                bot.send_message(chat_id, f"🏆 **АБСОЛЮТНЫЙ ЧЕМПИОН ESCAPE** 🏆\n━━━━━━━━━━━━━━━━━━━━━━\n🎉 Игрок **{n2}** одержал 3 победы в КНБ и выигрывает марафон! 🎉", parse_mode="Markdown")
+                bot.send_message(chat_id, f"🏆 **АБСОЛЮТНЫЙ ЧЕМПИОН ESCAPE** 🏆\n━━━━━━━━━━━━━━━━━━━━━━\n🎉 Игрок **{n2}** одержал 3 победы в КНБ и забирает главный приз! 🎉", parse_mode="Markdown")
                 active_escapes.pop(chat_id, None)
             else:
-                # Играем дальше до 3 побед с задержкой
                 t = threading.Thread(target=lambda: (time.sleep(3), send_rps_stage(chat_id)))
                 t.daemon = True
                 t.start()
