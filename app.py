@@ -16,7 +16,6 @@ if not BOT_TOKEN:
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # --- ГЛОБАЛЬНОЕ ХРАНИЛИЩЕ ДЛЯ АКТИВНЫХ ДУЭЛЕЙ ---
-# Структура scores теперь хранит списки побед по раундам: {user_id: количество_выигранных_раундов}
 active_duels = {}
 
 # --- НАСТРОЙКА ВЕБ-СЕРВЕРА (Flask) ---
@@ -26,6 +25,7 @@ app = Flask(__name__)
 def home():
     return "Бот работает через Webhook 24/7!"
 
+# ИСПРАВЛЕНО: list_methods заменено на корректный methods
 @app.route(f'/{BOT_TOKEN}', methods=['POST'])
 def telegram_webhook():
     if request.headers.get('content-type') == 'application/json':
@@ -116,9 +116,9 @@ def start_duel(message):
         'creator_name': creator_name,
         'opponent_id': None,
         'opponent_name': None,
-        'round': 1,              # Текущий раунд
-        'round_rolls': {},       # Броски в ТЕКУЩЕМ раунде {user_id: score}
-        'wins': {creator_id: 0}  # Счётчик выигранных раундов
+        'round': 1,
+        'round_rolls': {},
+        'wins': {creator_id: 0}
     }
 
     markup = InlineKeyboardMarkup()
@@ -163,7 +163,7 @@ def handle_callbacks(call):
         duel['status'] = 'fighting'
         duel['opponent_id'] = user_id
         duel['opponent_name'] = user_name
-        duel['wins'][user_id] = 0  # Инициализируем счётчик побед оппонента
+        duel['wins'][user_id] = 0
 
         start_fight_text = (
             f"⚔️ **БИТВА НАЧАЛАСЬ!** ⚔️\n"
@@ -220,17 +220,14 @@ def monitor_duel_dice(message):
     else:
         score = message.dice.value
 
-    # Записываем результат броска в текущем раунде
     duel['round_rolls'][user_id] = score
 
-    # Ждем, пока оба сделают ход в текущем раунде
     if len(duel['round_rolls']) == 2:
         c_id, o_id = duel['creator_id'], duel['opponent_id']
         c_name, o_name = duel['creator_name'], duel['opponent_name']
         c_score = duel['round_rolls'][c_id]
         o_score = duel['round_rolls'][o_id]
 
-        # Подводим итоги раунда
         if c_score > o_score:
             duel['wins'][c_id] += 1
             round_winner = f"Выиграл {c_name} 🎯"
@@ -240,9 +237,8 @@ def monitor_duel_dice(message):
         else:
             round_winner = "Ничья в раунде! 🤝"
 
-        # Проверяем, есть ли абсолютный победитель (кто-то набрал 2 победы) или закончились 3 раунда
+        # Финал наступает, если сыграно 3 раунда или кто-то взял 2 победы
         if duel['wins'][c_id] == 2 or duel['wins'][o_id] == 2 or duel['round'] == 3:
-            # ФИНАЛ ИГРЫ
             total_c_wins = duel['wins'][c_id]
             total_o_wins = duel['wins'][o_id]
 
@@ -269,9 +265,8 @@ def monitor_duel_dice(message):
                 result_text += "🤝 Абсолютная ничья по итогам всех раундов! Вы оба достойные бойцы!"
 
             bot.send_message(chat_id, result_text)
-            active_duels.pop(chat_id, None)  # Закрываем дуэль
+            active_duels.pop(chat_id, None)
         else:
-            # ПЕРЕХОД К СЛЕДУЮЩЕМУ РАУНДУ
             status_text = (
                 f"📊 **Итоги {duel['round']}-го раунда:**\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -284,7 +279,6 @@ def monitor_duel_dice(message):
             )
             bot.send_message(chat_id, status_text)
             
-            # Сбрасываем броски раунда и инкрементируем счетчик раундов
             duel['round'] += 1
             duel['round_rolls'] = {}
 
