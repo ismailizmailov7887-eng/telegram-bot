@@ -9,7 +9,7 @@ load_load_env() # Загрузит переменные из файла .env, е
 
 # --- ИНИЦИАЛИЗАЦИЯ БОТА ---
 # Берем токен из переменных окружения. Если его там нет, берем заглушку
-BOT_TOKEN = os.environ.get("8598717015:AAGhbHPy-C9VTkcYb2XSyrJ3a_i83JNojf8 ")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 if not BOT_TOKEN:
     raise ValueError("ОШИБКА: Переменная окружения BOT_TOKEN не установлена!")
@@ -134,4 +134,4 @@ if __name__ == '__main__':
     flask_thread.start()
     
     print("Бот успешно запущен и готов к работе...")
-    bot.infinity_polling(timeout=10, long_polling_timeout=5)
+    bot.infinity_polling(timeout=10, long_polling_timeout=5)    
