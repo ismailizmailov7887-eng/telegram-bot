@@ -5,7 +5,7 @@ from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # --- ИНИЦИАЛИЗАЦИЯ БОТА ---
-BOT_TOKEN = os.environ.get("8598717015:AAGhbHPy-C9VTkcYb2XSyrJ3a_i83JNojf8 ", "ВАШ_ТОКЕН_БОТА")
+BOT_TOKEN = "8598717015:AAGhbHPy-C9VTkcYb2XSyrJ3a_i83JNojf8" 
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # --- НАСТРОЙКА ВЕБ-СЕРВЕРА (для UptimeRobot / Cron-Job) ---
