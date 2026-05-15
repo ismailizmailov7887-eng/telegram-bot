@@ -16,22 +16,25 @@ duels = {}
 
 # --- КЛАССЫ ЛОГИКИ ---
 
-class GameDoors:
+class GameEscape:
     def __init__(self, chat_id, prize, admin_id):
         self.chat_id = chat_id
         self.prize = prize
-        self.admin_id = admin_id
-        self.players = {}  
+        self.admin_id = admin_id  
+        self.players = {}  # {user_id: {'name': name, 'alive': True}}
         self.round = 1
         self.choosing_phase = False
         self.choices = {}
         self.dead_door = None
+        self.lobby_msg_id = None  
 
     def add_player(self, user_id, name):
         if user_id not in self.players:
-            self.players[user_id] = {'name': name, 'alive': True}
-            return True
-        return False
+            if len(self.players) < 30:
+                self.players[user_id] = {'name': name, 'alive': True}
+                return "added"
+            return "full"
+        return "exists"
 
     def get_alive_players(self):
         return {uid: data for uid, data in self.players.items() if data['alive']}
@@ -57,7 +60,7 @@ def cmd_start(message):
     btn_settings = types.InlineKeyboardButton(text="Settings", url='https://t.me/direcode_bot')
 
     markup.row(btn_accept, btn_reject)
-    markup.row(btn_info, btn_settings)
+    markup.row(btn_info, inline_keyboard_button = btn_settings)
     
     text = '<b>Добро пожаловать в Direcode bot!</b> <tg-emoji emoji-id="5372878077250519677">✅</tg-emoji>'
     bot.send_message(message.chat.id, text, parse_mode='HTML', reply_markup=markup)
@@ -69,29 +72,34 @@ def stop_all(message):
     if cid in duels: del duels[cid]
     bot.reply_to(message, "🛑 Комната очищена. Все игры остановлены.")
 
-# --- ЛОГИКА: 3 ДВЕРИ ---
+# --- ЛОГИКА: ESCAPE ---
 
 @bot.message_handler(commands=['start_game'])
-def cmd_start_doors(message):
+def cmd_start_escape(message):
     cid = message.chat.id
-    if cid in games: return bot.reply_to(message, "⚠️ Игра уже запущена!")
-    msg = bot.send_message(cid, "🎁 Введите название приза для игры '3 Двери':")
-    bot.register_next_step_handler(msg, process_doors_prize, cid)
+    if cid in games: 
+        return bot.reply_to(message, "⚠️ Игра Escape уже запущена в этом чате!")
+    msg = bot.send_message(cid, "🎁 Введите название приза для игры <b>Escape</b>:", parse_mode='HTML')
+    bot.register_next_step_handler(msg, process_escape_prize, cid)
 
-def process_doors_prize(message, cid):
+def process_escape_prize(message, cid):
     if not message.text or message.text.startswith('/'): return
-    games[cid] = GameDoors(cid, message.text, message.from_user.id)
+    games[cid] = GameEscape(cid, message.text, message.from_user.id)
     
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🚪 Вступить", callback_data="join_doors"))
-    markup.add(types.InlineKeyboardButton("▶️ Начать игру", callback_data="start_doors_round"))
+    markup.add(types.InlineKeyboardButton("🚪 Вступить в игру", callback_data="join_escape"))
+    markup.add(types.InlineKeyboardButton("▶️ Запустить Escape", callback_data="start_escape_round"))
     
-    text_doors = (
-        f"🚪 <b>Игра 3 Двери</b>\n\n"
-        f"🏆 Приз: <b>{message.text}</b>\n\n"
-        f"Нажмите кнопку ниже, чтобы вступить!"
+    text_lobby = (
+        f"🏃‍♂️ <b>Режим: Escape</b>\n\n"
+        f"Вы заперты в комплексе. Каждый раунд перед вами открываются 3 двери, но одна из них ведет в ловушку. "
+        f"Ваша задача — угадать безопасный путь и остаться последним выжившим.\n\n"
+        f"🏆 Приз: <b>{message.text}</b>\n"
+        f"👥 Участники: <b>0 / 30</b> (Минимум: 4)\n\n"
+        f"Нажмите кнопку ниже, чтобы попытаться сбежать!"
     )
-    bot.send_message(cid, text_doors, parse_mode='HTML', reply_markup=markup)
+    lobby_msg = bot.send_message(cid, text_lobby, parse_mode='HTML', reply_markup=markup)
+    games[cid].lobby_msg_id = lobby_msg.message_id
 
 # --- ЛОГИКА: ДУЭЛЬ ---
 
@@ -124,30 +132,55 @@ def process_duel_prize(message, cid):
 def callback_handler(call):
     cid, uid = call.message.chat.id, call.from_user.id
 
-    if call.data == "join_doors":
-        if cid in games and games[cid].add_player(uid, call.from_user.first_name):
-            bot.answer_callback_query(call.id, "✅ Вы в игре!")
-        else:
-            bot.answer_callback_query(call.id, "❌ Ошибка входа.")
-
-    elif call.data == "start_doors_round":
+    if call.data == "join_escape":
         game = games.get(cid)
-        if not game or uid != game.admin_id: 
-            return bot.answer_callback_query(call.id, "Только админ!")
-        if len(game.get_alive_players()) < 1: 
-            return bot.answer_callback_query(call.id, "Нет игроков!")
+        if not game:
+            bot.answer_callback_query(call.id, "❌ Игра ещё не создана.", show_alert=True)
+            return
+
+        status = game.add_player(uid, call.from_user.first_name)
+
+        if status == "exists":
+            bot.answer_callback_query(call.id, "Ты уже в игре, не спи! 🏃‍♂️", show_alert=False)
+        elif status == "full":
+            bot.answer_callback_query(call.id, "❌ Комплекс заполнен! Максимум 30 человек.", show_alert=True)
+        elif status == "added":
+            bot.answer_callback_query(call.id, "✅ Вы успешно вступили в Escape!", show_alert=False)
+            
+            current_players = len(game.players)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🚪 Вступить в игру", callback_data="join_escape"))
+            markup.add(types.InlineKeyboardButton("▶️ Запустить Escape", callback_data="start_escape_round"))
+            
+            text_updated = (
+                f"🏃‍♂️ <b>Режим: Escape</b>\n\n"
+                f"Вы заперты в комплексе. Каждый раунд перед вами открываются 3 двери, но одна из них ведет в ловушку. "
+                f"Ваша задача — угадать безопасный путь и остаться последним выжившим.\n\n"
+                f"🏆 Приз: <b>{game.prize}</b>\n"
+                f"👥 Участники: <b>{current_players} / 30</b> (Минимум: 4)\n\n"
+                f"Нажмите кнопку ниже, чтобы попытаться сбежать!"
+            )
+            try:
+                bot.edit_message_text(text_updated, cid, game.lobby_msg_id, parse_mode='HTML', reply_markup=markup)
+            except Exception:
+                pass
+
+    elif call.data == "start_escape_round":
+        game = games.get(cid)
+        if not game: return
         
-        game.choosing_phase, game.choices = True, {}
-        game.dead_door = random.randint(1, 3)
-        
-        markup = types.InlineKeyboardMarkup().row(
-            types.InlineKeyboardButton("🚪 1", callback_data="door_1"),
-            types.InlineKeyboardButton("🚪 2", callback_data="door_2"),
-            types.InlineKeyboardButton("🚪 3", callback_data="door_3")
-        )
-        text_round = f"🚀 <b>Раунд {game.round}</b>\n\nВыберите дверь! У вас есть 20 секунд."
-        bot.send_message(cid, text_round, parse_mode='HTML', reply_markup=markup)
-        threading.Timer(20.0, finish_doors_round, [cid]).start()
+        # Проверка прав администратора чата
+        user_status = bot.get_chat_member(cid, uid).status
+        if user_status not in ['administrator', 'creator'] and uid != game.admin_id:
+            bot.send_message(cid, "❌ Начать игру может только администратор чата / канала.")
+            return
+
+        # Проверка минимального количества участников
+        if len(game.players) < 4:
+            bot.send_message(cid, "Не удалось начать игру, попробуйте позже 🥲")
+            return
+            
+        execute_escape_round(cid)
 
     elif call.data.startswith("door_"):
         game = games.get(cid)
@@ -176,13 +209,60 @@ def callback_handler(call):
             del duels[cid]
             bot.edit_message_text("❌ Дуэль отменена.", cid, call.message.message_id)
 
+# --- ИГРОВОЙ ПРОЦЕСС ESCAPE ---
+
+def execute_escape_round(cid):
+    game = games.get(cid)
+    if not game: return
+    
+    game.choosing_phase = True
+    game.choices = {}
+    game.dead_door = random.randint(1, 3) # Двери меняются каждый раунд
+    
+    markup = types.InlineKeyboardMarkup().row(
+        types.InlineKeyboardButton("🚪 1", callback_data="door_1"),
+        types.InlineKeyboardButton("🚪 2", callback_data="door_2"),
+        types.InlineKeyboardButton("🚪 3", callback_data="door_3")
+    )
+    text_round = f"🚀 <b>Раунд {game.round}</b>\n\nВыберите дверь! У вас есть 20 секунд."
+    bot.send_message(cid, text_round, parse_mode='HTML', reply_markup=markup)
+    threading.Timer(20.0, finish_escape_round, [cid]).start()
+
+def finish_escape_round(cid):
+    game = games.get(cid)
+    if not game: return
+    game.choosing_phase = False
+    dead = game.dead_door
+    
+    text = f"⌛️ <b>Время вышло!</b>\n\nЛовушка была за дверью: 🚪 <b>{dead}</b>\n\n"
+    for uid, data in list(game.players.items()):
+        if not data['alive']: continue
+        if game.choices.get(uid) == dead or uid not in game.choices:
+            game.players[uid]['alive'] = False
+            text += f"💀 {data['name']} — выбывает\n"
+        else: 
+            text += f"✅ {data['name']} — проходит дальше\n"
+    
+    alive = game.get_alive_players()
+    if not alive:
+        bot.send_message(cid, text + "\nВсе игроки выбыли!", parse_mode='HTML')
+        del games[cid]
+    elif len(alive) == 1:
+        winner = list(alive.values())[0]['name']
+        bot.send_message(cid, text + f"\n🏆 <b>Победитель: {winner}</b>\nПриз: <b>{game.prize}</b>", parse_mode='HTML')
+        del games[cid]
+    else:
+        game.round += 1
+        bot.send_message(cid, text + "\n⏳ Приготовьтесь, выберите дверь, у вас есть 10 секунд...", parse_mode='HTML')
+        # Автоматический перерыв 10 секунд перед следующим раундом
+        threading.Timer(10.0, execute_escape_round, [cid]).start()
+
 # --- ТЕКСТ, DICE И EMOJI ID ---
 
 @bot.message_handler(content_types=['text', 'dice'])
 def handle_text_and_dice(message):
     cid, uid = message.chat.id, message.from_user.id
     
-    # Получение Emoji ID
     custom_emoji_id = None
     if message.entities:
         for entity in message.entities:
@@ -193,7 +273,6 @@ def handle_text_and_dice(message):
         bot.reply_to(message, f'Emoji: <code>{message.text}</code>\nID: <code>{custom_emoji_id}</code>', parse_mode='HTML')
         return
 
-    # Логика Дуэли
     if cid in duels:
         d = duels[cid]
         if d.started and d.current_turn == uid:
@@ -231,34 +310,6 @@ def handle_text_and_dice(message):
                         bot.send_message(cid, res, parse_mode='HTML')
                         del duels[cid]
 
-def finish_doors_round(cid):
-    game = games.get(cid)
-    if not game: return
-    game.choosing_phase = False
-    dead = game.dead_door
-    
-    text = f"⌛️ <b>Время вышло!</b>\n\nЛовушка была за дверью: 🚪 <b>{dead}</b>\n\n"
-    for uid, data in list(game.players.items()):
-        if not data['alive']: continue
-        if game.choices.get(uid) == dead or uid not in game.choices:
-            game.players[uid]['alive'] = False
-            text += f"💀 {data['name']} — выбывает\n"
-        else: 
-            text += f"✅ {data['name']} — проходит дальше\n"
-    
-    alive = game.get_alive_players()
-    if not alive:
-        bot.send_message(cid, text + "\nВсе игроки выбыли!", parse_mode='HTML')
-        del games[cid]
-    elif len(alive) == 1:
-        winner = list(alive.values())[0]['name']
-        bot.send_message(cid, text + f"\n🏆 <b>Победитель: {winner}</b>\nПриз: <b>{game.prize}</b>", parse_mode='HTML')
-        del games[cid]
-    else:
-        game.round += 1
-        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("➡️ Следующий раунд", callback_data="start_doors_round"))
-        bot.send_message(cid, text, parse_mode='HTML', reply_markup=markup)
-
 # --- ЗАПУСК ---
 @app.route('/')
 def health(): return "OK", 200
@@ -268,7 +319,7 @@ if __name__ == '__main__':
     bot.set_my_commands([
         types.BotCommand("start", "Главное меню"),
         types.BotCommand("duel", "Создать дуэль"),
-        types.BotCommand("start_game", "Игра 3 Двери"),
+        types.BotCommand("start_game", "Игра Escape"),
         types.BotCommand("stop", "Остановить игры")
     ])
     threading.Thread(target=lambda: bot.infinity_polling(skip_pending=True)).start()
