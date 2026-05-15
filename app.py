@@ -13,18 +13,17 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
 
 if not BOT_TOKEN:
-    raise ValueError("ОШИБКА: Переменная BOT_TOKEN не установлена в настройках Render!")
+    raise ValueError("ОШИБКА: Переменная BOT_TOKEN не установлена!")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# Хранилища для активных игр
 active_escapes = {}
 active_duels = {}
 
 @app.route('/')
 def home():
-    return "Бот работает!", 200
+    return "Бот работает стабильно!", 200
 
 @app.route(f'/{BOT_TOKEN}', methods=['POST'])
 def telegram_webhook():
@@ -36,9 +35,7 @@ def telegram_webhook():
     return 'Forbidden', 403
 
 
-# Проверка, является ли пользователь админом/создателем чата
 def is_user_admin(chat_id, user_id):
-    # В личных сообщениях проверка не нужна
     if chat_id == user_id:
         return True
     try:
@@ -49,7 +46,7 @@ def is_user_admin(chat_id, user_id):
 
 
 # =====================================================================
-#                          КОМАНДА /START
+#                          КОМАНДЫ СТАРТА И ПОМОЩИ
 # =====================================================================
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
@@ -57,13 +54,43 @@ def send_welcome(message):
         f"👋 Привет, {message.from_user.first_name}!\n\n"
         f"🎮 **ДОСТУПНЫЕ ИГРЫ:**\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🏃‍♂️ **[ ESCAPE ]** — Выживание в комнатах с дверями.\n"
+        f"🏃‍♂️ **[ ESCAPE ]** — Бесконечное выживание в комнатах.\n"
         f"➡️ Запуск: `/escape` (Только для Админов)\n\n"
         f"⚔️ **[ DUEL ]** — Дуэль на кубиках 1 на 1 (3 раунда).\n"
-        f"➡️ Запуск: `/duel`\n"
+        f"➡️ Запуск: `/duel` (Для всех участников)\n\n"
+        f"🛑 **УПРАВЛЕНИЕ ИГРАМИ:**\n"
+        f"➡️ Сброс: `/stop` (Мгновенная остановка любых игр админом)\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
     )
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown")
+
+
+# =====================================================================
+#                          КОМАНДА /STOP (ЭКСТРЕННЫЙ СБРОС)
+# =====================================================================
+@bot.message_handler(commands=['stop'])
+def emergency_stop_games(message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    if not is_user_admin(chat_id, user_id):
+        bot.reply_to(message, "❌ Останавливать игры могут только администраторы чата!")
+        return
+
+    was_stopped = False
+
+    if chat_id in active_escapes:
+        active_escapes.pop(chat_id, None)
+        was_stopped = True
+
+    if chat_id in active_duels:
+        active_duels.pop(chat_id, None)
+        was_stopped = True
+
+    if was_stopped:
+        bot.send_message(chat_id, "🛑 **ЭКСТРЕННАЯ ОСТАНОВКА:** Все активные игры и сессии в этом чате были принудительно завершены админом.", parse_mode="Markdown")
+    else:
+        bot.send_message(chat_id, "ℹ️ В этом чате сейчас нет запущенных игр.")
 
 
 # =====================================================================
@@ -76,7 +103,7 @@ def start_duel(message):
     user_name = message.from_user.first_name
 
     if chat_id in active_duels:
-        bot.reply_to(message, "❌ В этом чате уже создана дуэль или идет бой!")
+        bot.reply_to(message, "❌ В этом чате уже идет дуэль или создано лобби!")
         return
 
     active_duels[chat_id] = {
@@ -115,14 +142,12 @@ def start_escape(message):
     chat_id = message.chat.id
     user_id = message.from_user.id
 
-    # Проверка на админа при создании регистрации
     if not is_user_admin(chat_id, user_id):
         bot.reply_to(message, "❌ Запускать регистрацию на ESCAPE могут только админы чата!")
         return
 
     if chat_id in active_escapes:
-        bot.reply_to(message, "❌ Игра ESCAPE уже запущена или собирается!")
-        return
+        active_escapes.pop(chat_id, None)
 
     active_escapes[chat_id] = {
         'status': 'registration',
@@ -146,7 +171,7 @@ def start_escape(message):
         f"👥 Собрано игроков: 1\n"
         f"📝 Список:\n• {message.from_user.first_name}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"Админ, нажмите «Начать игру», когда все соберутся!"
+        f"👑 Администратор, нажмите «Начать игру», когда все соберутся!"
     )
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
@@ -165,40 +190,44 @@ def send_door_stage(chat_id, message_id=None):
     )
 
     text = (
-        f"🏃‍♂️ **ESCAPE — РАУНД {game['stage_round']}** 🏃‍♂️\n"
+        f"🚪 **ESCAPE — РАУНД {game['stage_round']}** 🚪\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👥 Выжившие ({len(game['alive'])}): {', '.join(alive_names)}\n\n"
-        f"⏳ **У вас есть ровно 10 секунд!**\n"
-        f"Сделайте свой выбор 👇"
+        f"👥 Оставшиеся в живых ({len(game['alive'])}):\n"
+        f"🔥 {', '.join(alive_names)}\n\n"
+        f"⚡️ Каждую секунду ловушка меняет свое местоположение!\n"
+        f"⏳ **У вас ровно 10 секунд на выбор двери!** 👇"
     )
     
     if message_id:
         try:
             bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, parse_mode="Markdown", reply_markup=markup)
         except Exception:
+            try:
+                msg = bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
+                message_id = msg.message_id
+            except Exception: return
+    else:
+        try:
             msg = bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
             message_id = msg.message_id
-    else:
-        msg = bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
-        message_id = msg.message_id
+        except Exception: return
 
-    # Запускаем 10-секундный таймер в отдельном потоке
     game['timer_id'] += 1
     current_timer_id = game['timer_id']
-    threading.Thread(target=door_timeout, args=(chat_id, game['stage_round'], current_timer_id)).start()
+    
+    t = threading.Thread(target=door_timeout, args=(chat_id, game['stage_round'], current_timer_id))
+    t.daemon = True
+    t.start()
 
 
 def door_timeout(chat_id, round_num, timer_id):
-    time.sleep(10)  # Ждем 10 секунд
-    
+    time.sleep(10)
     if chat_id not in active_escapes: return
     game = active_escapes[chat_id]
     
-    # Проверяем, актуален ли еще этот таймер и этот раунд
     if game['status'] != 'playing' or game['stage_round'] != round_num or game['timer_id'] != timer_id:
         return
         
-    # Все, кто не выбрал дверь, автоматически выбывают
     dead_by_timeout = []
     for uid in list(game['alive']):
         if uid not in game['chosen_doors']:
@@ -206,9 +235,10 @@ def door_timeout(chat_id, round_num, timer_id):
             game['alive'].remove(uid)
             
     if dead_by_timeout:
-        bot.send_message(chat_id, f"⏱ **Время истекло!**\n⚰️ {', '.join(dead_by_timeout)} не успели выбрать дверь и погибли.")
+        try:
+            bot.send_message(chat_id, f"⏱ **ВРЕМЯ ИСТЕКЛО!**\n⚰️ Игроки: *{', '.join(dead_by_timeout)}* не успели сделать выбор и превратились в пыль.", parse_mode="Markdown")
+        except Exception: pass
         
-    # Пересчитываем итоги раунда, как будто все сделали выбор
     process_round_results(chat_id)
 
 
@@ -216,9 +246,8 @@ def process_round_results(chat_id):
     if chat_id not in active_escapes: return
     game = active_escapes[chat_id]
     
-    # Если все умерли от таймера и никто не выбрал двери
     if not game['alive']:
-        bot.send_message(chat_id, "💀 Все игроки погибли от нерешительности! Игра окончена.")
+        bot.send_message(chat_id, "💀 **Никто не выжил!** Все игроки погибли из-за нерешительности. Игра окончена.")
         active_escapes.pop(chat_id, None)
         return
 
@@ -226,7 +255,6 @@ def process_round_results(chat_id):
     next_alive = []
     dead_this_round = []
 
-    # Проверяем только тех, кто выжил после таймера и сделал выбор
     for uid in game['alive']:
         if game['chosen_doors'].get(uid) == death_door:
             if random.random() < 0.65:
@@ -236,11 +264,10 @@ def process_round_results(chat_id):
         else:
             next_alive.append(uid)
 
-    # Если ловушка добила вообще всех оставшихся — раунд переигрывается
     if not next_alive:
         next_alive = game['alive'].copy()
         dead_this_round = []
-        bot.send_message(chat_id, f"⚠️ Ловушка была в двери {death_door}, но удача на вашей стороне! Все выжили, переигрываем раунд.")
+        bot.send_message(chat_id, f"⚠️ Ловушка захлопнулась в двери **{death_door}**, но боги пощадили вас! Все выжили, продолжаем марафон.")
 
     game['alive'] = next_alive
     dead_text = ", ".join(dead_this_round) if dead_this_round else "Никто"
@@ -248,38 +275,36 @@ def process_round_results(chat_id):
     round_report = (
         f"📊 **ИТОГИ РАУНДА {game['stage_round']}**\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💀 Ловушка была в двери: **{death_door}**\n"
-        f"⚰️ Погибли в ловушке: {dead_text}\n"
+        f"💀 Ловушка находилась в: **Комнате №{death_door}**\n"
+        f"⚰️ Погибли в этом раунде: *{dead_text}*\n"
         f"━━━━━━━━━━━━━━━━━━━━━━"
     )
     bot.send_message(chat_id, round_report, parse_mode="Markdown")
 
-    # Проверка условий завершения
     if len(game['alive']) == 1:
         winner_name = game['players'][game['alive'][0]]
-        bot.send_message(chat_id, f"👑 **ПОБЕДИТЕЛЬ ESCAPE:** **{winner_name}** 🎉\nПоздравляем с выживанием!")
+        bot.send_message(chat_id, f"👑 **ПОБЕДИТЕЛЬ ESCAPE:**\n━━━━━━━━━━━━━━━━━━━━━━\n🎉 Игрок **{winner_name}** прошел через весь ад и выжил один! 👑", parse_mode="Markdown")
         active_escapes.pop(chat_id, None)
     elif len(game['alive']) == 2:
         game['status'] = 'rps_final'
         send_rps_stage(chat_id)
-    elif len(game['alive']) == 0:
-        bot.send_message(chat_id, "💀 Никто не дожил до финала. Все мертвы!")
-        active_escapes.pop(chat_id, None)
     else:
         game['stage_round'] += 1
         send_door_stage(chat_id)
 
 
 def send_rps_stage(chat_id):
+    if chat_id not in active_escapes: return
     game = active_escapes[chat_id]
     game['rps'] = {} 
     
     markup_rps = InlineKeyboardMarkup()
     markup_rps.add(
         InlineKeyboardButton("🪨 Камень", callback_data="rps_rock"),
-        InlineKeyboardButton("✂️ Ножницы", callback_data="rps_scissors"),
-        InlineKeyboardButton("📄 Бумага", callback_data="rps_paper")
+        InlineKeyboardButton("✂️ Ножницы", callback_data="rps_scissors")
     )
+    markup_rps.add(InlineKeyboardButton("📄 Бумага", callback_data="rps_paper"))
+    
     p1_name = game['players'][game['alive'][0]]
     p2_name = game['players'][game['alive'][1]]
     
@@ -287,14 +312,16 @@ def send_rps_stage(chat_id):
         chat_id, 
         f"🏆 **ФИНАЛ КНБ** 🏆\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💥 **{p1_name}**  vs  **{p2_name}**\n\n"
-        f"Выбирайте оружие 👇", 
-        reply_markup=markup_rps
+        f"💥 **{p1_name}**  vs  **{p2_name}**\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Осталось только двое! Выберите свое оружие для финального удара 👇", 
+        reply_markup=markup_rps,
+        parse_mode="Markdown"
     )
 
 
 # =====================================================================
-#                      ЕДИНЫЙ ОБРАБОТЧИК КНОПОК
+#                      ОБРАБОТЧИК ИНЛАЙН-КНОПОК
 # =====================================================================
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
@@ -363,12 +390,14 @@ def handle_callbacks(call):
         if chat_id not in active_escapes: return
         game = active_escapes[chat_id]
         
-        # Только админ может запустить старт игры
         if not is_user_admin(chat_id, user_id):
             bot.answer_callback_query(call.id, "❌ Начать игру может только админ чата!", show_alert=True)
             return
             
         if game['status'] != 'registration': return
+        if len(game['players']) < 2:
+            bot.answer_callback_query(call.id, "❌ Нужно хотя бы 2 человека!", show_alert=True)
+            return
         
         game['status'] = 'playing'
         game['alive'] = list(game['players'].keys())
@@ -397,7 +426,6 @@ def handle_callbacks(call):
         game['chosen_doors'][user_id] = door_num
         bot.answer_callback_query(call.id, f"Вы зашли в дверь №{door_num}")
 
-        # Если все живые успели проголосовать до таймера
         if len(game['chosen_doors']) == len(game['alive']):
             process_round_results(chat_id)
 
@@ -423,24 +451,30 @@ def handle_callbacks(call):
 
             translations = {'rock': '🪨 Камень', 'scissors': '✂️ Ножницы', 'paper': '📄 Бумага'}
 
-            res = f"🏁 **ФИНАЛ КНБ ЗАВЕРШЕН** 🏁\n━━━━━━━━━━━━━━━━━━━━━━\n👤 {n1}: {translations[c1]}\n👤 {n2}: {translations[c2]}\n━━━━━━━━━━━━━━━━━━━━━━\n"
+            res = (
+                f"🏁 **ИТОГИ ФИНАЛЬНОГО БОЯ** 🏁\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"👤 {n1}: **{translations[c1]}**\n"
+                f"👤 {n2}: **{translations[c2]}**\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            )
             
             if c1 == c2:
-                res += "🤝 **Ничья! Скидываемся заново...**"
+                res += "🤝 **Ничья! Снаряды столкнулись в воздухе. Переигровка!**"
                 bot.send_message(chat_id, res, parse_mode="Markdown")
                 send_rps_stage(chat_id) 
             elif (c1=='rock' and c2=='scissors') or (c1=='scissors' and c2=='paper') or (c1=='paper' and c2=='rock'):
-                res += f"👑 Победитель ESCAPE: **{n1}** 🎉"
+                res += f"👑 **ПОБЕДИТЕЛЬ ESCAPE:** **{n1}** 🎉"
                 bot.send_message(chat_id, res, parse_mode="Markdown")
                 active_escapes.pop(chat_id, None)
             else:
-                res += f"👑 Победитель ESCAPE: **{n2}** 🎉"
+                res += f"👑 **ПОБЕДИТЕЛЬ ESCAPE:** **{n2}** 🎉"
                 bot.send_message(chat_id, res, parse_mode="Markdown")
                 active_escapes.pop(chat_id, None)
 
 
 # =====================================================================
-#          МЕХАНИКА ОБРАБОТКИ КУБИКОВ И ТЕКСТА ДЛЯ ДУЭЛИ
+#             ОБРАБОТКА ИГРОВЫХ КУБИКОВ И ТЕКСТА ДУЭЛЕЙ
 # =====================================================================
 @bot.message_handler(content_types=['dice', 'text'])
 def monitor_duel_dice(message):
@@ -463,7 +497,9 @@ def monitor_duel_dice(message):
         return
 
     if is_command:
-        score = bot.send_dice(chat_id, emoji='🎲', reply_to_message_id=message.message_id).dice.value
+        try:
+            score = bot.send_dice(chat_id, emoji='🎲', reply_to_message_id=message.message_id).dice.value
+        except Exception: return
     else:
         score = message.dice.value
 
@@ -478,8 +514,8 @@ def monitor_duel_dice(message):
             res = (
                 f"🏆 **ФИНАЛ ДУЭЛИ ЗАВЕРШЕН** 🏆\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"✨ {duel['creator_name']}: {duel['total_scores'][c_id]} очков\n"
-                f"✨ {duel['opponent_name']}: {duel['total_scores'][o_id]} очков\n"
+                f"✨ {duel['creator_name']}: **{duel['total_scores'][c_id]}** очков\n"
+                f"✨ {duel['opponent_name']}: **{duel['total_scores'][o_id]}** очков\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
             )
             if duel['total_scores'][c_id] > duel['total_scores'][o_id]:
@@ -487,20 +523,21 @@ def monitor_duel_dice(message):
             elif duel['total_scores'][o_id] > duel['total_scores'][c_id]:
                 res += f"🎉 Победитель дуэли: **{duel['opponent_name']}** 👑"
             else:
-                res += "🤝 Ничья по очкам!"
+                res += "🤝 Ничья по очкам! Победила дружба."
             
             bot.send_message(chat_id, res, parse_mode="Markdown")
             active_duels.pop(chat_id, None)
         else:
             status_text = (
-                f"📊 **ИТОГИ {duel['round']} РАУНДА**\n"
-                f"• {duel['creator_name']} выбросил: {duel['round_rolls'][c_id]}\n"
-                f"• {duel['opponent_name']} выбросил: {duel['round_rolls'][o_id]}\n\n"
-                f"📈 **ОБЩИЙ СЧЕТ:**\n"
-                f"✨ {duel['creator_name']}: {duel['total_scores'][c_id]}\n"
-                f"✨ {duel['opponent_name']}: {duel['total_scores'][o_id]}\n"
+                f"📊 **ИТОГИ РАУНДА №{duel['round']}**\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🎲 **РАУНД {duel['round'] + 1} / 3** — Кидайте кубики!"
+                f"🎲 {duel['creator_name']} выбросил: **{duel['round_rolls'][c_id]}**\n"
+                f"🎲 {duel['opponent_name']} выбросил: **{duel['round_rolls'][o_id]}**\n\n"
+                f"📈 **ОБЩИЙ СЧЕТ:**\n"
+                f"✨ {duel['creator_name']}: **{duel['total_scores'][c_id]}**\n"
+                f"✨ {duel['opponent_name']}: **{duel['total_scores'][o_id]}**\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🎲 **РАУНД {duel['round'] + 1} / 3** — Время кидать кубики!"
             )
             bot.send_message(chat_id, status_text, parse_mode="Markdown")
             duel['round'] += 1
