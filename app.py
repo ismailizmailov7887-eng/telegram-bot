@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- ИНИЦИАЛИЗАЦИЯ БОТА ---
-# Теперь строго ищет переменную BOT_TOKEN, которую мы задали на Render
+# Берем токен СТРОГО из переменных окружения Render (название переменной: BOT_TOKEN)
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 if not BOT_TOKEN:
@@ -84,51 +84,97 @@ def start_escape(message):
 @bot.message_handler(commands=['duel'])
 def start_duel(message):
     chat_id = message.chat.id
+    creator_name = message.from_user.first_name
+    creator_id = message.from_user.id
 
     markup = InlineKeyboardMarkup()
+    
+    # Кнопка для оппонента (в callback_data передаем ID создателя дуэли для проверки)
+    btn_accept = InlineKeyboardButton("⚔️ Принять вызов", callback_data=f"accept_duel_{creator_id}")
+    # Кнопка для администраторов
     btn_stop = InlineKeyboardButton("🛑 Завершить DUEL", callback_data="stop_duel")
+    
+    # Добавляем кнопки друг под другом
+    markup.add(btn_accept)
     markup.add(btn_stop)
 
     duel_text = (
         f"⚔️ **Вызов на ДУЭЛЬ брошен!** ⚔️\n"
         f"───────────────────\n"
+        f"👤 Организатор: *{creator_name}*\n"
         f"🎯 Кто примет вызов?\n\n"
         f"🛑 _Внимание: досрочно завершить поединок кнопкой ниже может только администратор!_"
     )
     bot.send_message(chat_id, duel_text, parse_mode="Markdown", reply_markup=markup)
 
 
-# --- ОБРАБОТКА НАЖАТИЙ НА КНОПКИ ОСТАНОВКИ (СТРОГО ДЛЯ АДМИНОВ) ---
-@bot.callback_query_handler(func=lambda call: call.data in ["stop_escape", "stop_duel"])
-def handle_stop_game(call):
+# --- ОБРАБОТКА НАЖАТИЙ НА КНОПКИ ---
+
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callbacks(call):
     chat_id = call.message.chat.id
     user_id = call.from_user.id
-    
-    if not is_admin(chat_id, user_id):
-        print(f"Пользователь {call.from_user.first_name} ({user_id}) пытался остановить игру без прав.")
-        bot.answer_callback_query(
-            callback_query_id=call.id, 
-            text="⚠️ Доступ запрещен! Останавливать игры могут только администраторы.", 
-            show_alert=True
-        )
-        return
+    user_name = call.from_user.first_name
 
-    game_name = "ESCAPE" if call.data == "stop_escape" else "DUEL"
-    
-    stop_text = (
-        f"🛑 **Игра {game_name} досрочно завершена!**\n"
-        f"───────────────────\n"
-        f"👑 Действие выполнено администратором: *{call.from_user.first_name}*"
-    )
-    
-    bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=call.message.message_id,
-        text=stop_text,
-        parse_mode="Markdown",
-        reply_markup=None
-    )
-    bot.answer_callback_query(call.id, text="Игра успешно остановлена.")
+    # 1. ОБРАБОТКА ПРИНЯТИЯ ДУЭЛИ
+    if call.data.startswith("accept_duel_"):
+        # Извлекаем ID создателя дуэли из callback_data
+        creator_id = int(call.data.split("_")[2])
+        
+        # Проверка: нельзя играть с самим собой
+        if user_id == creator_id:
+            bot.answer_callback_query(
+                callback_query_id=call.id, 
+                text="❌ Вы не можете принять собственный вызов!", 
+                show_alert=True
+            )
+            return
+
+        # Если соперник валиден, запускаем дуэль
+        start_fight_text = (
+            f"⚔️ **ДУЭЛЬ НАЧАЛАСЬ!** ⚔️\n"
+            f"───────────────────\n"
+            f"💥 Поединок между игроками успешно запущен!\n"
+            f"🏃‍♂️ Вызов принял(а): *{user_name}*\n\n"
+            f"🎯 Приготовьтесь, исход битвы решится прямо сейчас..."
+        )
+        
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            text=start_fight_text,
+            parse_mode="Markdown",
+            reply_markup=None  # Удаляем кнопки, так как игра началась
+        )
+        bot.answer_callback_query(call.id, text="Вы приняли вызов! Битва началась.")
+
+    # 2. ОБРАБОТКА ОСТАНОВКИ ИГР (СТРОГО ДЛЯ АДМИНОВ)
+    elif call.data in ["stop_escape", "stop_duel"]:
+        if not is_admin(chat_id, user_id):
+            print(f"Пользователь {user_name} ({user_id}) пытался остановить игру без прав.")
+            bot.answer_callback_query(
+                callback_query_id=call.id, 
+                text="⚠️ Доступ запрещен! Останавливать игры могут только администраторы.", 
+                show_alert=True
+            )
+            return
+
+        game_name = "ESCAPE" if call.data == "stop_escape" else "DUEL"
+        
+        stop_text = (
+            f"🛑 **Игра {game_name} досрочно завершена!**\n"
+            f"───────────────────\n"
+            f"👑 Действие выполнено администратором: *{user_name}*"
+        )
+        
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            text=stop_text,
+            parse_mode="Markdown",
+            reply_markup=None
+        )
+        bot.answer_callback_query(call.id, text="Игра успешно остановлена.")
 
 
 # --- ЗАПУСК ПРОЕКТА ---
