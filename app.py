@@ -8,7 +8,6 @@ load_dotenv()
 
 # --- ИНИЦИАЛИЗАЦИЯ БОТА ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-# Для вебхуков нам нужен URL твоего приложения на Render (например, https://my-bot.onrender.com)
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
 
 if not BOT_TOKEN:
@@ -17,17 +16,17 @@ if not BOT_TOKEN:
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # --- ГЛОБАЛЬНОЕ ХРАНИЛИЩЕ ДЛЯ АКТИВНЫХ ДУЭЛЕЙ ---
+# Структура scores теперь хранит списки побед по раундам: {user_id: количество_выигранных_раундов}
 active_duels = {}
 
-# --- НАСТРОЙКА ВЕБ-СЕРВЕРА (Flask теперь обрабатывает и запросы Telegram) ---
+# --- НАСТРОЙКА ВЕБ-СЕРВЕРА (Flask) ---
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     return "Бот работает через Webhook 24/7!"
 
-# Сюда Telegram будет присылать все сообщения из чатов
-@app.route(f'/{BOT_TOKEN}', list_methods=['POST'])
+@app.route(f'/{BOT_TOKEN}', methods=['POST'])
 def telegram_webhook():
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
@@ -41,7 +40,7 @@ def telegram_webhook():
 # --- ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ПРОВЕРКИ АДМИНА ---
 def is_admin(chat_id, user_id):
     try:
-        if chat_id == user_id:
+        if chat_id == user_id:  # В личке сам себе админ
             return True
         member = bot.get_chat_member(chat_id, user_id)
         return member.status in ['administrator', 'creator']
@@ -55,15 +54,20 @@ def is_admin(chat_id, user_id):
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     welcome_text = (
-        f"👋 Привет, *{message.from_user.first_name}*!\n\n"
-        f"🎮 **Доступные игры в группе:**\n\n"
-        f"🏃‍♂️ **ESCAPE**:\n"
-        f"➡️ `/escape` — Запустить игру (🛑 *Только админам*)\n\n"
-        f"⚔️ **DUEL**:\n"
-        f"➡️ `/duel` — Бросить вызов на поединок.\n\n"
-        f"🎲 *После старта дуэли кидайте кубик 🎲 или пишите `/dice`*"
+        f"👋 Привет, {message.from_user.first_name}!\n\n"
+        f"🎮 Доступные игры в этой группе:\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🏃‍♂️ [ ESCAPE ]\n"
+        f"• Описание: Выживи или проиграй.\n"
+        f"• Запуск: ➡️ /escape\n"
+        f"⚠️ Доступно только для администрации.\n\n"
+        f"⚔️ [ DUEL ]\n"
+        f"• Описание: Сразись 1 на 1 в серии из 3 бросков.\n"
+        f"• Вызов: ➡️ /duel\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎲 После старта дуэли бросайте кубик 🎲 или используйте команду /dice!"
     )
-    bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown")
+    bot.send_message(message.chat.id, welcome_text)
 
 
 # --- ИГРА ESCAPE ---
@@ -73,7 +77,12 @@ def start_escape(message):
     user_id = message.from_user.id
 
     if not is_admin(chat_id, user_id):
-        bot.reply_to(message, "❌ Ошибка доступа: Только администраторы могут запускать ESCAPE!")
+        error_text = (
+            f"🚫 Ошибка доступа\n\n"
+            f"🏃‍♂️ Игра ESCAPE может быть запущена только администрацией чата!\n"
+            f"🔒 Пожалуйста, попросите администратора ввести команду /escape, чтобы начать сбор игроков."
+        )
+        bot.reply_to(message, error_text)
         return
 
     markup = InlineKeyboardMarkup()
@@ -82,9 +91,10 @@ def start_escape(message):
 
     escape_text = (
         f"🏃‍♂️ **Игра ESCAPE началась!** 🏃‍♂️\n"
-        f"───────────────────\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"👑 Организатор: {message.from_user.first_name}\n"
-        f"🚪 Приготовьтесь к побегу..."
+        f"🚪 Приготовьтесь к побегу...\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━"
     )
     bot.send_message(chat_id, escape_text, parse_mode="Markdown", reply_markup=markup)
 
@@ -97,8 +107,19 @@ def start_duel(message):
     creator_name = message.from_user.first_name
 
     if chat_id in active_duels:
-        bot.reply_to(message, "❌ В этом чате уже идет дуэль! Дождитесь её окончания.")
+        bot.reply_to(message, "❌ В этом чате уже идет или готовится дуэль! Дождитесь её окончания.")
         return
+
+    active_duels[chat_id] = {
+        'status': 'waiting',
+        'creator_id': creator_id,
+        'creator_name': creator_name,
+        'opponent_id': None,
+        'opponent_name': None,
+        'round': 1,              # Текущий раунд
+        'round_rolls': {},       # Броски в ТЕКУЩЕМ раунде {user_id: score}
+        'wins': {creator_id: 0}  # Счётчик выигранных раундов
+    }
 
     markup = InlineKeyboardMarkup()
     btn_accept = InlineKeyboardButton("⚔️ Принять вызов", callback_data=f"accept_duel_{creator_id}")
@@ -108,9 +129,10 @@ def start_duel(message):
 
     duel_text = (
         f"⚔️ **Вызов на ДУЭЛЬ брошен!** ⚔️\n"
-        f"───────────────────\n"
-        f"👤 Организатор: *{creator_name}*\n"
-        f"🎯 Кто примет вызов?"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 Организатор: {creator_name}\n"
+        f"🎯 Кто примет вызов на битву из 3 бросков?\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━"
     )
     bot.send_message(chat_id, duel_text, parse_mode="Markdown", reply_markup=markup)
 
@@ -129,42 +151,39 @@ def handle_callbacks(call):
             bot.answer_callback_query(call.id, text="❌ Вы не можете принять собственный вызов!", show_alert=True)
             return
 
-        if chat_id in active_duels:
-            bot.answer_callback_query(call.id, text="❌ Дуэль уже кем-то принята или идет!", show_alert=True)
+        if chat_id not in active_duels:
+            bot.answer_callback_query(call.id, text="❌ Дуэль не найдена или была отменена!", show_alert=True)
+            return
+            
+        if active_duels[chat_id]['status'] == 'fighting':
+            bot.answer_callback_query(call.id, text="❌ Дуэль уже кем-то принята!", show_alert=True)
             return
 
-        creator_name = "Организатор"
-        if call.message.entities:
-            for entity in call.message.entities:
-                if entity.type == "bold" and "Организатор" not in call.message.text[entity.offset:entity.offset+entity.length]:
-                    creator_name = call.message.text[entity.offset:entity.offset+entity.length]
-
-        active_duels[chat_id] = {
-            'creator_id': creator_id,
-            'creator_name': creator_name,
-            'opponent_id': user_id,
-            'opponent_name': user_name,
-            'scores': {}
-        }
+        duel = active_duels[chat_id]
+        duel['status'] = 'fighting'
+        duel['opponent_id'] = user_id
+        duel['opponent_name'] = user_name
+        duel['wins'][user_id] = 0  # Инициализируем счётчик побед оппонента
 
         start_fight_text = (
-            f"⚔️ **ДУЭЛЬ НАЧАЛАСЬ!** ⚔️\n"
-            f"───────────────────\n"
-            f"💥 Игроки: *{creator_name}* VS *{user_name}*\n\n"
-            f"🎲 **ЧТО ДЕЛАТЬ ДАЛЬШЕ:**\n"
-            f"Оба игрока должны отправить в чат кубик (эмодзи 🎲) или написать команду `/dice`.\n"
-            f"Бот подсчитает очки и выберет победителя!"
+            f"⚔️ **БИТВА НАЧАЛАСЬ!** ⚔️\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 {duel['creator_name']}  vs  👤 {user_name}\n"
+            f"🎯 Формат: Битва до 3-х бросков!\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🚩 **РАУНД 1** 🚩\n"
+            f"Оба игрока, бросайте кубик 🎲 или пишите `/dice`!"
         )
         
         bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=start_fight_text, parse_mode="Markdown", reply_markup=None)
-        bot.answer_callback_query(call.id, text="Вы приняли вызов! Бросайте кубики!")
+        bot.answer_callback_query(call.id, text="Вы приняли вызов! Раунд 1 начался!")
 
     elif call.data in ["stop_escape", "stop_duel"]:
         if not is_admin(chat_id, user_id):
             bot.answer_callback_query(call.id, text="⚠️ Отменять игры могут только администраторы.", show_alert=True)
             return
 
-        if call.data == "stop_duel" and chat_id in active_duels:
+        if call.data == "stop_duel":
             active_duels.pop(chat_id, None)
 
         game_name = "ESCAPE" if call.data == "stop_escape" else "DUEL"
@@ -172,12 +191,15 @@ def handle_callbacks(call):
         bot.answer_callback_query(call.id, text="Игра успешно остановлена.")
 
 
-# --- СЛЕЖКА ЗА КУБИКАМИ И СБОР РЕЗУЛЬТАТОВ ---
+# --- СЛЕЖКА ЗА КУБИКАМИ И МНОГОРАУНДОВАЯ ЛОГИКА ---
 @bot.message_handler(content_types=['dice', 'text'], func=lambda msg: msg.chat.id in active_duels)
 def monitor_duel_dice(message):
     chat_id = message.chat.id
     user_id = message.from_user.id
     duel = active_duels[chat_id]
+
+    if duel['status'] != 'fighting' or message.from_user.is_bot:
+        return
 
     if user_id != duel['creator_id'] and user_id != duel['opponent_id']:
         return
@@ -188,8 +210,8 @@ def monitor_duel_dice(message):
     if not (is_command or is_emoji_dice):
         return
 
-    if user_id in duel['scores']:
-        bot.reply_to(message, "❌ Вы уже сделали свой бросок в этой дуэли!")
+    if user_id in duel['round_rolls']:
+        bot.reply_to(message, f"❌ Вы уже бросили кубик в {duel['round']}-м раунде!")
         return
 
     if is_command:
@@ -198,33 +220,73 @@ def monitor_duel_dice(message):
     else:
         score = message.dice.value
 
-    duel['scores'][user_id] = score
+    # Записываем результат броска в текущем раунде
+    duel['round_rolls'][user_id] = score
 
-    if len(duel['scores']) == 2:
+    # Ждем, пока оба сделают ход в текущем раунде
+    if len(duel['round_rolls']) == 2:
         c_id, o_id = duel['creator_id'], duel['opponent_id']
-        c_score = duel['scores'][c_id]
-        o_score = duel['scores'][o_id]
-        
-        c_name = duel['creator_name']
-        o_name = duel['opponent_name']
+        c_name, o_name = duel['creator_name'], duel['opponent_name']
+        c_score = duel['round_rolls'][c_id]
+        o_score = duel['round_rolls'][o_id]
 
-        result_text = (
-            f"🏆 **РЕЗУЛЬТАТЫ ДУЭЛИ** 🏆\n"
-            f"───────────────────\n"
-            f"👤 {c_name} выбросил: **{c_score}** 🎲\n"
-            f"👤 {o_name} выбросил: **{o_score}** 🎲\n"
-            f"───────────────────\n"
-        )
-
+        # Подводим итоги раунда
         if c_score > o_score:
-            result_text += f"🎉 Победитель: *{c_name}*! Король арены! 👑"
+            duel['wins'][c_id] += 1
+            round_winner = f"Выиграл {c_name} 🎯"
         elif o_score > c_score:
-            result_text += f"🎉 Победитель: *{o_name}*! Король арены! 👑"
+            duel['wins'][o_id] += 1
+            round_winner = f"Выиграл {o_name} 🎯"
         else:
-            result_text += "🤝 **Ничья!** Оба бойца равны по силе. Начните новую дуэль!"
+            round_winner = "Ничья в раунде! 🤝"
 
-        bot.send_message(chat_id, result_text, parse_mode="Markdown")
-        active_duels.pop(chat_id, None)
+        # Проверяем, есть ли абсолютный победитель (кто-то набрал 2 победы) или закончились 3 раунда
+        if duel['wins'][c_id] == 2 or duel['wins'][o_id] == 2 or duel['round'] == 3:
+            # ФИНАЛ ИГРЫ
+            total_c_wins = duel['wins'][c_id]
+            total_o_wins = duel['wins'][o_id]
+
+            result_text = (
+                f"🏆 РЕЗУЛЬТАТЫ ДУЭЛИ 🏆\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"⚔️ Битва титанов (3 раунда):\n"
+                f"👤 {c_name}  vs  👤 {o_name}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"🎲 Последний раунд бросков:\n"
+                f"┌─ {c_name}: {c_score} 🎲\n"
+                f"└─ {o_name}: {o_score} 🎲\n\n"
+                f"📊 Общий счет по раундам:\n"
+                f"⭐ {c_name}: {total_c_wins}\n"
+                f"⭐ {o_name}: {total_o_wins}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            )
+
+            if total_c_wins > total_o_wins:
+                result_text += f"🎉 Победитель: {c_name} 👑\n🌟 Король арены! 🌟"
+            elif total_o_wins > total_c_wins:
+                result_text += f"🎉 Победитель: {o_name} 👑\n🌟 Король арены! 🌟"
+            else:
+                result_text += "🤝 Абсолютная ничья по итогам всех раундов! Вы оба достойные бойцы!"
+
+            bot.send_message(chat_id, result_text)
+            active_duels.pop(chat_id, None)  # Закрываем дуэль
+        else:
+            # ПЕРЕХОД К СЛЕДУЮЩЕМУ РАУНДУ
+            status_text = (
+                f"📊 **Итоги {duel['round']}-го раунда:**\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"👤 {c_name}: {c_score} 🎲\n"
+                f"👤 {o_name}: {o_score} 🎲\n\n"
+                f"📢 {round_winner}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"🚩 **РАУНД {duel['round'] + 1}** 🚩\n"
+                f"Жду броски кубиков от бойцов!"
+            )
+            bot.send_message(chat_id, status_text)
+            
+            # Сбрасываем броски раунда и инкрементируем счетчик раундов
+            duel['round'] += 1
+            duel['round_rolls'] = {}
 
 
 # --- ЗАПУСК ВЕБХУКА ---
@@ -232,13 +294,11 @@ if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     
     if RENDER_EXTERNAL_URL:
-        # Переключаем Telegram в режим вебхуков на адрес нашего Flask
         webhook_url = f"{RENDER_EXTERNAL_URL.rstrip('/')}/{BOT_TOKEN}"
-        print(f"Установка Webhopok на адрес: {webhook_url}")
+        print(f"Установка Webhook на адрес: {webhook_url}")
         bot.remove_webhook()
         bot.set_webhook(url=webhook_url, drop_pending_updates=True)
     else:
-        print("ВНИМАНИЕ: RENDER_EXTERNAL_URL не найден, вебхук не настроен. Проверьте переменные окружения Render.")
+        print("ВНИМАНИЕ: RENDER_EXTERNAL_URL не найден. Проверьте настройки окружения Render.")
 
-    # Запускаем Flask-сервер как основное приложение (никаких конфликтующих потоков)
     app.run(host="0.0.0.0", port=port)
