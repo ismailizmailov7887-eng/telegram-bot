@@ -3,13 +3,13 @@ import telebot
 from threading import Thread
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from dotenv import load_dotenv  # Исправлено: правильное имя функции
+from dotenv import load_dotenv
 
-load_dotenv()  # Исправлено: инициализация dotenv
+load_dotenv()
 
 # --- ИНИЦИАЛИЗАЦИЯ БОТА ---
-# Берем токен из переменных окружения Render
-BOT_TOKEN = os.environ.get(" 8598717015:AAGhbHPy-C9VTkcYb2XSyrJ3a_i83JNojf8 ")
+# Теперь строго ищет переменную BOT_TOKEN, которую мы задали на Render
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 if not BOT_TOKEN:
     raise ValueError("ОШИБКА: Переменная окружения BOT_TOKEN не установлена на Render!")
