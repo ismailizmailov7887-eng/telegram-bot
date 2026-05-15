@@ -59,14 +59,14 @@ def send_welcome(message):
         f"⚔️ **[ DUEL ]** — Дуэль на кубиках 1 на 1 (3 раунда).\n"
         f"➡️ Запуск: `/duel` (Для всех участников)\n\n"
         f"🛑 **УПРАВЛЕНИЕ ИГРАМИ:**\n"
-        f"➡️ Сброс: `/stop` (Мгновенная остановка любых игр админом)\n"
+        f"➡️ Сброс: `/stop` (Мгновенная остановка игры ESCAPE админом)\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
     )
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown")
 
 
 # =====================================================================
-#                          КОМАНДА /STOP (ЭКСТРЕННЫЙ СБРОС)
+#                          КОМАНДА /STOP (ДЛЯ АДМИНИСТРАТОРОВ)
 # =====================================================================
 @bot.message_handler(commands=['stop'])
 def emergency_stop_games(message):
@@ -74,7 +74,7 @@ def emergency_stop_games(message):
     user_id = message.from_user.id
 
     if not is_user_admin(chat_id, user_id):
-        bot.reply_to(message, "❌ Останавливать игры могут только администраторы чата!")
+        bot.reply_to(message, "❌ Останавливать марафон ESCAPE могут только администраторы чата!")
         return
 
     was_stopped = False
@@ -88,7 +88,7 @@ def emergency_stop_games(message):
         was_stopped = True
 
     if was_stopped:
-        bot.send_message(chat_id, "🛑 **ЭКСТРЕННАЯ ОСТАНОВКА:** Все активные игры и сессии в этом чате были принудительно завершены админом.", parse_mode="Markdown")
+        bot.send_message(chat_id, "🛑 **ЭКСТРЕННАЯ ОСТАНОВКА:** Все активные игры в этом чате были принудительно завершены админом.", parse_mode="Markdown")
     else:
         bot.send_message(chat_id, "ℹ️ В этом чате сейчас нет запущенных игр.")
 
@@ -120,7 +120,7 @@ def start_duel(message):
     markup = InlineKeyboardMarkup()
     markup.add(
         InlineKeyboardButton("⚔️ Принять вызов", callback_data=f"accept_duel_{user_id}"),
-        InlineKeyboardButton("🛑 Отменить", callback_data="stop_duel")
+        InlineKeyboardButton("🛑 Отменить дуэль", callback_data="stop_duel")
     )
 
     duel_text = (
@@ -163,7 +163,7 @@ def start_escape(message):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🏃‍♂️ Участвовать", callback_data="join_escape"))
     markup.add(InlineKeyboardButton("🚀 Начать игру", callback_data="run_escape"), 
-               InlineKeyboardButton("🛑 Отменить", callback_data="stop_escape"))
+               InlineKeyboardButton("🛑 Отменить игру", callback_data="stop_escape"))
 
     text = (
         f"🏃‍♂️ **РЕГИСТРАЦИЯ НА ИГРУ ESCAPE** 🏃‍♂️\n"
@@ -353,11 +353,9 @@ def handle_callbacks(call):
         )
 
     elif call.data == "stop_duel":
-        if not is_user_admin(chat_id, user_id):
-            bot.answer_callback_query(call.id, "❌ Отменять дуэль могут только админы!", show_alert=True)
-            return
+        # Убрана проверка на админа: теперь КНОПКУ отмены дуэли может нажать любой желающий
         active_duels.pop(chat_id, None)
-        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="🛑 Дуэль отменена.", reply_markup=None)
+        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="🛑 Дуэль успешно отменена участником чата.", reply_markup=None)
 
     # --- КНОПКИ ESCAPE ---
     elif call.data == "join_escape":
@@ -376,7 +374,7 @@ def handle_callbacks(call):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("🏃‍♂️ Участвовать", callback_data="join_escape"))
         markup.add(InlineKeyboardButton("🚀 Начать игру", callback_data="run_escape"), 
-                   InlineKeyboardButton("🛑 Отменить", callback_data="stop_escape"))
+                   InlineKeyboardButton("🛑 Отменить игру", callback_data="stop_escape"))
 
         bot.edit_message_text(
             chat_id=chat_id, 
