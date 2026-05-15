@@ -1,34 +1,41 @@
 import os
 import telebot
-import time
-from threading import Thread
-from flask import Flask
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from flask import Flask, request
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 from dotenv import load_dotenv
 
 load_dotenv()
 
 # --- ИНИЦИАЛИЗАЦИЯ БОТА ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+# Для вебхуков нам нужен URL твоего приложения на Render (например, https://my-bot.onrender.com)
+RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
 
 if not BOT_TOKEN:
-    raise ValueError("ОШИБКА: Переменная окружения BOT_TOKEN не установлена!")
+    raise ValueError("ОШИБКА: Переменная BOT_TOKEN не установлена!")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # --- ГЛОБАЛЬНОЕ ХРАНИЛИЩЕ ДЛЯ АКТИВНЫХ ДУЭЛЕЙ ---
 active_duels = {}
 
-# --- НАСТРОЙКА ВЕБ-СЕРВЕРА ---
+# --- НАСТРОЙКА ВЕБ-СЕРВЕРА (Flask теперь обрабатывает и запросы Telegram) ---
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Бот работает 24/7!"
+    return "Бот работает через Webhook 24/7!"
 
-def run_flask():
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+# Сюда Telegram будет присылать все сообщения из чатов
+@app.route(f'/{BOT_TOKEN}', list_methods=['POST'])
+def telegram_webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return 'OK', 200
+    else:
+        return 'Forbidden', 403
 
 
 # --- ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ПРОВЕРКИ АДМИНА ---
@@ -220,26 +227,18 @@ def monitor_duel_dice(message):
         active_duels.pop(chat_id, None)
 
 
-# --- ЗАПУСК ПРОЕКТА С ЗАЩИТОЙ ОТ ПЕРЕЗАПУСКОВ ---
+# --- ЗАПУСК ВЕБХУКА ---
 if __name__ == '__main__':
-    # 1. Запуск Flask в фоне
-    flask_thread = Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
+    port = int(os.environ.get("PORT", 5000))
     
-    # 2. Жесткий сброс старых сессий Telegram
-    print("Очистка старых соединений...")
-    try:
-        bot.delete_webhook(drop_pending_updates=True)
-        time.sleep(2)  # Даем Telegram паузу закрыть старые сессии
-    except Exception as e:
-        print(f"Предупреждение при очистке: {e}")
+    if RENDER_EXTERNAL_URL:
+        # Переключаем Telegram в режим вебхуков на адрес нашего Flask
+        webhook_url = f"{RENDER_EXTERNAL_URL.rstrip('/')}/{BOT_TOKEN}"
+        print(f"Установка Webhopok на адрес: {webhook_url}")
+        bot.remove_webhook()
+        bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+    else:
+        print("ВНИМАНИЕ: RENDER_EXTERNAL_URL не найден, вебхук не настроен. Проверьте переменные окружения Render.")
 
-    # 3. Бесконечный цикл с автоматическим переподключением
-    print("Бот успешно запущен и защищен от падений!")
-    while True:
-        try:
-            bot.polling(none_stop=True, interval=1, timeout=20)
-        except Exception as e:
-            print(f"Ошибка пуллинга (переподключение через 5 сек): {e}")
-            time.sleep(5)
+    # Запускаем Flask-сервер как основное приложение (никаких конфликтующих потоков)
+    app.run(host="0.0.0.0", port=port)
