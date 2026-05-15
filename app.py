@@ -168,7 +168,6 @@ def start_escape(message):
 
     text = (
         f"🎮 **ИГРА СОЗДАНА!**\n\n"
-        f"🏆 Приз: **тоны**\n"
         f"👥 Игроков: **1 / 30**\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"👤 **Список участников:**\n"
@@ -184,7 +183,6 @@ def send_door_stage(chat_id, message_id=None):
     game = active_escapes[chat_id]
     game['chosen_doors'] = {}  
     
-    # Формируем красивый вертикальный список живых игроков
     alive_list_text = "\n".join([f"👤 {game['players'][uid]}" for uid in game['alive']])
     
     markup = InlineKeyboardMarkup()
@@ -219,7 +217,6 @@ def send_door_stage(chat_id, message_id=None):
     game['timer_id'] += 1
     current_timer_id = game['timer_id']
     
-    # Таймер на 30 секунд
     t = threading.Thread(target=door_timeout, args=(chat_id, game['stage_round'], current_timer_id))
     t.daemon = True
     t.start()
@@ -244,6 +241,14 @@ def door_timeout(chat_id, round_num, timer_id):
             bot.send_message(chat_id, f"⏱ **ВРЕМЯ ИСТЕКЛО!**\n⚰️ Игроки: *{', '.join(dead_by_timeout)}* не успели выбрать комнату и выбывают.", parse_mode="Markdown")
         except Exception: pass
         
+    # Запуск подсчета итогов с задержкой 10 секунд после окончания времени/выборов
+    t = threading.Thread(target=delayed_round_results, args=(chat_id,))
+    t.daemon = True
+    t.start()
+
+
+def delayed_round_results(chat_id):
+    time.sleep(10) # Ждем 10 секунд перед выводом итогов
     process_round_results(chat_id)
 
 
@@ -256,16 +261,14 @@ def process_round_results(chat_id):
         active_escapes.pop(chat_id, None)
         return
 
-    # Выбираем смертельную комнату (65% шанс гибели внутри неё)
     death_door = random.choice([1, 2, 3])
     
-    # Списки для красивого отображения итогов по комнатам
     room_players = {1: [], 2: [], 3: []}
     next_alive = []
     dead_this_round = []
 
     for uid in game['alive']:
-        chosen = game['chosen_doors'].get(uid, 1) # Если вдруг не выбрал, по дефолту 1
+        chosen = game['chosen_doors'].get(uid, 1)
         
         if chosen == death_door:
             if random.random() < 0.65:
@@ -278,7 +281,6 @@ def process_round_results(chat_id):
             next_alive.append(uid)
             room_players[chosen].append(f"   ✅ {game['players'][uid]} → выжил")
 
-    # Если ловушка убила абсолютно всех, даем шанс на спасение (чтобы игра не ломалась)
     if not next_alive and game['alive']:
         next_alive = game['alive'].copy()
         dead_this_round = []
@@ -289,7 +291,6 @@ def process_round_results(chat_id):
 
     game['alive'] = next_alive
 
-    # Формируем строки для каждой комнаты
     r1_text = "\n".join(room_players[1]) if room_players[1] else "   *Пусто*"
     r2_text = "\n".join(room_players[2]) if room_players[2] else "   *Пусто*"
     r3_text = "\n".join(room_players[3]) if room_players[3] else "   *Пусто*"
@@ -315,7 +316,6 @@ def delayed_next_stage(chat_id):
     if chat_id not in active_escapes: return
     game = active_escapes[chat_id]
 
-    # Если остался 1 или 2 игрока — двигаемся к финишу
     if len(game['alive']) == 1:
         time.sleep(3)
         winner_name = game['players'][game['alive'][0]]
@@ -327,7 +327,6 @@ def delayed_next_stage(chat_id):
         game['rps_scores'] = {game['alive'][0]: 0, game['alive'][1]: 0}
         send_rps_stage(chat_id)
     else:
-        # Анонс следующего раунда через 5 секунд в стиле твоего примера
         next_r = game['stage_round'] + 1
         bot.send_message(chat_id, f"🔜 **РАУНД {next_r}!** Осталось {len(game['alive'])} участников. Через 5 секунд...", parse_mode="Markdown")
         
@@ -429,7 +428,7 @@ def handle_callbacks(call):
         bot.edit_message_text(
             chat_id=chat_id, 
             message_id=call.message.message_id, 
-            text=f"🎮 **ИГРА СОЗДАНА!**\n\n🏆 Приз: **тоны**\n👥 Игроков: **{len(game['players'])} / 30**\n━━━━━━━━━━━━━━━━━━━━━━\n👤 **Список участников:**\n{player_list}\n━━━━━━━━━━━━━━━━━━━━━━\n👑 Администратор, нажмите «Начать игру», когда все соберутся!", 
+            text=f"🎮 **ИГРА СОЗДАНА!**\n\n👥 Игроков: **{len(game['players'])} / 30**\n━━━━━━━━━━━━━━━━━━━━━━\n👤 **Список участников:**\n{player_list}\n━━━━━━━━━━━━━━━━━━━━━━\n👑 Администратор, нажмите «Начать игру», когда все соберутся!", 
             parse_mode="Markdown", 
             reply_markup=markup
         )
@@ -474,8 +473,12 @@ def handle_callbacks(call):
         game['chosen_doors'][user_id] = door_num
         bot.answer_callback_query(call.id, f"Вы зашли в Комнату №{door_num}")
 
+        # Если ВСЕ выжившие сделали свой выбор досрочно, запускаем таймер ожидания на 10 секунд
         if len(game['chosen_doors']) == len(game['alive']):
-            process_round_results(chat_id)
+            game['timer_id'] += 1 # Сбрасываем старый фоновый таймаут на 30 секунд
+            t = threading.Thread(target=delayed_round_results, args=(chat_id,))
+            t.daemon = True
+            t.start()
 
     elif call.data.startswith("rps_"):
         if chat_id not in active_escapes: return
@@ -523,10 +526,10 @@ def handle_callbacks(call):
             s2 = game['rps_scores'][p2_id]
 
             if s1 >= 3:
-                bot.send_message(chat_id, f"🏆 **АБСОЛЮТНЫЙ ЧЕМПИОН ESCAPE** 🏆\n━━━━━━━━━━━━━━━━━━━━━━\n🎉 Игрок **{n1}** одержал 3 победы в КНБ и забирает главный приз! 🎉", parse_mode="Markdown")
+                bot.send_message(chat_id, f"🏆 **АБСОЛЮТНЫЙ ЧЕМПИОН ESCAPE** 🏆\n━━━━━━━━━━━━━━━━━━━━━━\n🎉 Игрок **{n1}** одержал 3 победы в КНБ и выигрывает марафон! 🎉", parse_mode="Markdown")
                 active_escapes.pop(chat_id, None)
             elif s2 >= 3:
-                bot.send_message(chat_id, f"🏆 **АБСОЛЮТНЫЙ ЧЕМПИОН ESCAPE** 🏆\n━━━━━━━━━━━━━━━━━━━━━━\n🎉 Игрок **{n2}** одержал 3 победы в КНБ и забирает главный приз! 🎉", parse_mode="Markdown")
+                bot.send_message(chat_id, f"🏆 **АБСОЛЮТНЫЙ ЧЕМПИОН ESCAPE** 🏆\n━━━━━━━━━━━━━━━━━━━━━━\n🎉 Игрок **{n2}** одержал 3 победы в КНБ и выигрывает марафон! 🎉", parse_mode="Markdown")
                 active_escapes.pop(chat_id, None)
             else:
                 t = threading.Thread(target=lambda: (time.sleep(3), send_rps_stage(chat_id)))
