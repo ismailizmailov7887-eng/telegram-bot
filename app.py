@@ -33,16 +33,16 @@ def is_user_admin(chat_id, user_id):
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     welcome_text = (
-        f"👋 **Привет, {message.from_user.first_name}!**\n\n"
-        f"🌟 **ДОСТУПНЫЕ ИГРЫ:**\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🏃‍♂️ **[ ESCAPE ]** — Выживание в комнатах.\n"
-        f"🔷 `ЗАПУСК:` /escape (Только Админ)\n\n"
-        f"⚔️ **[ DUEL ]** — Битва на кубиках (3 раунда).\n"
-        f"🔶 `ЗАПУСК:` /duel (Для всех)\n\n"
-        f"⚙️ **УПРАВЛЕНИЕ:**\n"
-        f"🚫 `СБРОС:` /stop (Остановка всех игр)\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━"
+        f"👋 Привет, {message.from_user.first_name}!\n\n"
+        f"🏆 ДОСТУПНЫЕ ИГРЫ\n"
+        f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
+        f"🏃‍♂️ ESCAPE — Выживание в комнатах\n"
+        f"Запуск: /escape (Только Админ)\n\n"
+        f"⚔️ DUEL — Битва на кубиках\n"
+        f"Запуск: /duel (Для всех)\n\n"
+        f"⚙️ УПРАВЛЕНИЕ\n"
+        f"🛑 СБРОС: /stop (Остановка всех игр)\n"
+        f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
     )
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown")
 
@@ -54,7 +54,7 @@ def stop_all(message):
         return
     active_escapes.pop(chat_id, None)
     active_duels.pop(chat_id, None)
-    bot.send_message(chat_id, "🛑 **ВСЕ ИГРЫ ОСТАНОВЛЕНЫ.**", parse_mode="Markdown")
+    bot.send_message(chat_id, "🛑 ВСЕ ИГРЫ ОСТАНОВЛЕНЫ", parse_mode="Markdown")
 
 # =====================================================================
 #                          ЛОГИКА ESCAPE
@@ -75,16 +75,16 @@ def start_escape(message):
     }
     
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🎮 ВСТУПИТЬ", callback_data="esc_join"))
-    markup.add(InlineKeyboardButton("🚀 НАЧАТЬ ИГРУ", callback_data="esc_start"))
+    markup.add(InlineKeyboardButton("➕ ВСТУПИТЬ", callback_data="esc_join"))
+    markup.add(InlineKeyboardButton("🚀 НАЧАТЬ", callback_data="esc_start"))
     
     text = (
-        "🎮 **ИГРА НАЧИНАЕТСЯ!**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "👥 **УЧАСТНИКИ:**\n"
-        "📍 Пока никого нет...\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🏃‍♂️ Жми кнопку, чтобы войти в игру!"
+        "🎮 ИГРА НАЧИНАЕТСЯ\n"
+        "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
+        "👥 УЧАСТНИКИ:\n"
+        "📍 Список пуст...\n"
+        "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
+        "Жми кнопку, чтобы войти!"
     )
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
@@ -94,16 +94,16 @@ def update_registration_text(chat_id, message_id):
     players_list = "\n".join([f"👤 {name}" for name in game['players'].values()])
     
     text = (
-        "🎮 **ИГРА НАЧИНАЕТСЯ!**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👥 **Участников: {len(game['players'])}**\n"
+        "🎮 ИГРА НАЧИНАЕТСЯ\n"
+        "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
+        f"👥 Участников: {len(game['players'])}\n"
         f"{players_list}\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🏃‍♂️ Жми кнопку, чтобы войти в игру!"
+        "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
+        "Жми кнопку, чтобы войти!"
     )
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🎮 ВСТУПИТЬ", callback_data="esc_join"))
-    markup.add(InlineKeyboardButton("🚀 НАЧАТЬ ИГРУ", callback_data="esc_start"))
+    markup.add(InlineKeyboardButton("➕ ВСТУПИТЬ", callback_data="esc_join"))
+    markup.add(InlineKeyboardButton("🚀 НАЧАТЬ", callback_data="esc_start"))
     
     try:
         bot.edit_message_text(text, chat_id, message_id, parse_mode="Markdown", reply_markup=markup)
@@ -125,17 +125,17 @@ def escape_round_start(chat_id):
     
     markup = InlineKeyboardMarkup()
     markup.row(
-        InlineKeyboardButton("🚪 Комната 1", callback_data="dr_1"),
-        InlineKeyboardButton("🚪 Комната 2", callback_data="dr_2"),
-        InlineKeyboardButton("🚪 Комната 3", callback_data="dr_3")
+        InlineKeyboardButton("🚪 Дверь 1", callback_data="dr_1"),
+        InlineKeyboardButton("🚪 Дверь 2", callback_data="dr_2"),
+        InlineKeyboardButton("🚪 Дверь 3", callback_data="dr_3")
     )
     
     text = (
-        f"🔴 **РАУНД {game['room']}**\n\n"
-        f"🎲 **Выберите комнату!**\n\n"
-        f"👥 **Живые ({len(game['players'])}):**\n"
+        f"🔴 РАУНД {game['room']}\n\n"
+        f"🎲 Выберите свою комнату\n\n"
+        f"👥 В игре ({len(game['players'])}):\n"
         f"{players_list}\n\n"
-        f"⏰ **30 секунд!**"
+        f"⏰ У вас 30 секунд!"
     )
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
     threading.Timer(30.0, escape_round_results, args=(chat_id,)).start()
@@ -158,18 +158,18 @@ def escape_round_results(chat_id):
         else:
             door_data[door].append(name)
 
-    res_text = f"📊 **РЕЗУЛЬТАТЫ РАУНДА {game['room']}**\n\n"
+    res_text = f"📊 РЕЗУЛЬТАТЫ РАУНДА {game['room']}\n\n"
     for d in range(1, 4):
         p_str = ", ".join(door_data[d]) if door_data[d] else "Пусто"
-        icon = "💀 (Ловушка)" if d == game['dead_door'] else "✅"
-        res_text += f"🚪 **КОМНАТА {d}**\n   {icon} {p_str}\n\n"
+        icon = "💀 ЛОВУШКА" if d == game['dead_door'] else "✅ БЕЗОПАСНО"
+        res_text += f"🚪 КОМНАТА {d}\n{icon}: {p_str}\n\n"
 
     for p_id in dead_list:
         game['players'].pop(p_id)
     
     survivors_names = list(game['players'].values())
-    res_text += f"✅ **ВЫЖИЛИ:** {', '.join(survivors_names)}\n\n"
-    res_text += f"🔜 **РАУНД {game['room']+1}!** Осталось {len(survivors_names)} участников. Через 5 секунд..."
+    res_text += f"💎 ВЫЖИЛИ: {', '.join(survivors_names) if survivors_names else 'Никто'}\n\n"
+    res_text += f"🔜 СЛЕДУЮЩИЙ ЭТАП через 5 секунд..."
     
     bot.send_message(chat_id, res_text, parse_mode="Markdown")
     game['room'] += 1
@@ -179,7 +179,7 @@ def start_knb_final(chat_id):
     game = active_escapes[chat_id]
     if len(game['players']) < 2:
         winner = list(game['players'].values())[0] if game['players'] else "Никто"
-        bot.send_message(chat_id, f"🏆 **ПОБЕДИТЕЛЬ: {winner}**")
+        bot.send_message(chat_id, f"🏆 ПОБЕДИТЕЛЬ: {winner}")
         active_escapes.pop(chat_id, None)
         return
     
@@ -190,23 +190,24 @@ def start_knb_final(chat_id):
     n1, n2 = game['players'][ids[0]], game['players'][ids[1]]
     
     text = (
-        "🏁 **ФИНАЛ!**\n"
+        "🏁 ФИНАЛЬНАЯ БИТВА\n"
         f"👤 {n1} ⚔️ {n2}\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "КНБ до 3-х побед!\n"
-        "🎮 **Ваш ход!**"
+        "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
+        "Игра до 3-х побед\n"
+        "Сделайте свой ход!"
     )
     bot.send_message(chat_id, text, parse_mode="Markdown")
     next_knb_step(chat_id)
 
 def next_knb_step(chat_id):
+    if chat_id not in active_escapes: return
     game = active_escapes[chat_id]
     game['knb_moves'] = {}
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton("💎 Камень", callback_data="k_r"),
                InlineKeyboardButton("✂️ Ножницы", callback_data="k_s"),
                InlineKeyboardButton("📄 Бумага", callback_data="k_p"))
-    bot.send_message(chat_id, "🗳 **Сделайте выбор:**", reply_markup=markup)
+    bot.send_message(chat_id, "🗳 Выбирайте:", reply_markup=markup)
 
 def process_knb_logic(chat_id):
     game = active_escapes[chat_id]
@@ -214,20 +215,22 @@ def process_knb_logic(chat_id):
     m1, m2 = game['knb_moves'][ids[0]], game['knb_moves'][ids[1]]
     n1, n2 = game['players'][ids[0]], game['players'][ids[1]]
     rules = {'r': 's', 's': 'p', 'p': 'r'}
-    if m1 == m2: res = "🤝 НИЧЬЯ!"
+    
+    if m1 == m2: 
+        res = "🤝 НИЧЬЯ!"
     elif rules[m1] == m2:
         game['knb_score'][ids[0]] += 1
-        res = f"✅ {n1} выиграл раунд!"
+        res = f"✅ {n1} забирает раунд!"
     else:
         game['knb_score'][ids[1]] += 1
-        res = f"✅ {n2} выиграл раунд!"
+        res = f"✅ {n2} забирает раунд!"
     
-    score_text = f"📊 СЧЁТ: {n1} {game['knb_score'][ids[0]]} : {game['knb_score'][ids[1]]} {n2}"
+    score_text = f"📊 СЧЁТ: {n1} {game['knb_score'][ids[0]]} — {game['knb_score'][ids[1]]} {n2}"
     bot.send_message(chat_id, f"{res}\n{score_text}", parse_mode="Markdown")
     
     if any(s >= 3 for s in game['knb_score'].values()):
         win_id = max(game['knb_score'], key=game['knb_score'].get)
-        bot.send_message(chat_id, f"👑 **ПОБЕДИТЕЛЬ ИГРЫ: {game['players'][win_id]}**")
+        bot.send_message(chat_id, f"👑 ФИНАЛЬНЫЙ ПОБЕДИТЕЛЬ: {game['players'][win_id]}")
         active_escapes.pop(chat_id, None)
     else: 
         threading.Timer(2.0, next_knb_step, args=(chat_id,)).start()
@@ -254,15 +257,15 @@ def start_duel(message):
     }
 
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("⚔️ Принять вызов", callback_data=f"accept_duel"),
-               InlineKeyboardButton("🛑 Отмена", callback_data="stop_duel"))
+    markup.add(InlineKeyboardButton("⚔️ ПРИНЯТЬ", callback_data=f"accept_duel"),
+               InlineKeyboardButton("🛑 ОТМЕНА", callback_data="stop_duel"))
 
     text = (
-        f"⚔️ **ВЫЗОВ НА ДУЭЛЬ** ⚔️\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 **{message.from_user.first_name}** вызывает на бой!\n"
-        f"🎯 **3 раунда на кубиках.**\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━"
+        f"⚔️ ВЫЗОВ НА ДУЭЛЬ\n"
+        f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
+        f"👤 {message.from_user.first_name} вызывает на бой!\n"
+        f"🎯 3 раунда на кубиках\n"
+        f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
     )
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
@@ -275,7 +278,7 @@ def handle_dice(message):
     if duel['status'] != 'fighting': return
     if user_id not in [duel['creator_id'], duel['opponent_id']]: return
     if user_id in duel['round_rolls']:
-        bot.reply_to(message, "второй раз нельзя кидать леее")
+        bot.reply_to(message, "Ты уже бросил кубик в этом раунде!")
         return
     duel['round_rolls'][user_id] = message.dice.value
     if len(duel['round_rolls']) == 2:
@@ -290,34 +293,33 @@ def delayed_duel_result(chat_id):
     duel['total_scores'][o_id] = duel['total_scores'].get(o_id, 0) + duel['round_rolls'][o_id]
     
     if duel['round'] == 3:
-        # Определение победителя
         c_score = duel['total_scores'][c_id]
         o_score = duel['total_scores'][o_id]
         
         if c_score > o_score:
-            winner_text = f"👑 ПОБЕДИТЕЛЬ: **{duel['creator_name']}**"
+            winner_text = f"👑 ПОБЕДИТЕЛЬ: {duel['creator_name']}"
         elif o_score > c_score:
-            winner_text = f"👑 ПОБЕДИТЕЛЬ: **{duel['opponent_name']}**"
+            winner_text = f"👑 ПОБЕДИТЕЛЬ: {duel['opponent_name']}"
         else:
-            winner_text = "🤝 **НИЧЬЯ!**"
+            winner_text = "🤝 НИЧЬЯ!"
 
         res = (
-            f"🏆 **ФИНАЛЬНЫЙ СЧЕТ**\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"👤 {duel['creator_name']}: **{c_score}**\n"
-            f"👤 {duel['opponent_name']}: **{o_score}**\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🏆 ФИНАЛЬНЫЙ СЧЕТ\n"
+            f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
+            f"👤 {duel['creator_name']}: {c_score}\n"
+            f"👤 {duel['opponent_name']}: {o_score}\n"
+            f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
             f"{winner_text}"
         )
         bot.send_message(chat_id, res, parse_mode="Markdown")
         active_duels.pop(chat_id, None)
     else:
         status = (
-            f"📊 **РАУНД {duel['round']} ОКОНЧЕН**\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🔔 Счет: **{duel['total_scores'][c_id]}** : **{duel['total_scores'][o_id]}**\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🔜 **СЛЕДУЮЩИЙ РАУНД!** Кидайте кубики 🎲"
+            f"📊 РАУНД {duel['round']} ОКОНЧЕН\n"
+            f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
+            f"🔔 Счет: {duel['total_scores'][c_id]} — {duel['total_scores'][o_id]}\n"
+            f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
+            f"🔜 СЛЕДУЮЩИЙ РАУНД! Бросайте 🎲"
         )
         bot.send_message(chat_id, status, parse_mode="Markdown")
         duel['round'] += 1
@@ -343,9 +345,9 @@ def callbacks(call):
     elif call.data == "esc_start":
         if is_user_admin(chat_id, uid) and chat_id in active_escapes:
             if len(active_escapes[chat_id]['players']) >= 2:
-                bot.edit_message_text("🎮 **ИГРА НАЧИНАЕТСЯ!**", chat_id, call.message.message_id, parse_mode="Markdown")
+                bot.edit_message_text("🎮 ИГРА НАЧИНАЕТСЯ!", chat_id, call.message.message_id, parse_mode="Markdown")
                 escape_round_start(chat_id)
-            else: bot.answer_callback_query(call.id, "Нужно 2+ игрока", show_alert=True)
+            else: bot.answer_callback_query(call.id, "Нужно минимум 2 игрока", show_alert=True)
             
     elif call.data.startswith("dr_"):
         if chat_id in active_escapes and uid in active_escapes[chat_id]['players']:
@@ -356,15 +358,17 @@ def callbacks(call):
         if chat_id in active_escapes and active_escapes[chat_id]['status'] == 'knb':
             move = call.data.split("_")[1]
             active_escapes[chat_id]['knb_moves'][uid] = move
-            bot.answer_callback_query(call.id, "Принято!")
+            bot.answer_callback_query(call.id, "Выбор сделан!")
             if len(active_escapes[chat_id]['knb_moves']) == 2:
                 process_knb_logic(chat_id)
 
     elif call.data == "accept_duel":
         if chat_id in active_duels and active_duels[chat_id]['status'] == 'waiting':
-            if uid == active_duels[chat_id]['creator_id']: return
+            if uid == active_duels[chat_id]['creator_id']: 
+                bot.answer_callback_query(call.id, "Нельзя играть против самого себя!")
+                return
             active_duels[chat_id].update({'status': 'fighting', 'opponent_id': uid, 'opponent_name': call.from_user.first_name})
-            bot.edit_message_text("⚔️ **БИТВА НАЧАЛАСЬ!**\n\nКидайте кубики 🎲", chat_id, call.message.message_id, parse_mode="Markdown")
+            bot.edit_message_text("⚔️ БИТВА НАЧАЛАСЬ\n\nКидайте кубики 🎲", chat_id, call.message.message_id, parse_mode="Markdown")
             
     elif call.data == "stop_duel":
         active_duels.pop(chat_id, None)
