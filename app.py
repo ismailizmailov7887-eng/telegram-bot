@@ -63,47 +63,38 @@ def stop_all(message):
 def start_escape(message):
     chat_id = message.chat.id
     if not is_user_admin(chat_id, message.from_user.id):
-        bot.reply_to(message, "❌ Только админ может запустить Escape!")
+        bot.reply_to(message, "❌ Только админ может запустить.")
         return
-    if chat_id in active_escapes:
-        bot.reply_to(message, "❌ Игра уже запущена!")
-        return
-
-    active_escapes[chat_id] = {'room': 0, 'survivors': [], 'status': 'waiting'}
+    
+    active_escapes[chat_id] = {'status': 'waiting', 'players': [], 'room': 1}
     
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🏃 Вступить", callback_data="join_esc"),
-               InlineKeyboardButton("🚀 СТАРТ", callback_data="run_esc"))
+    markup.add(InlineKeyboardButton("🏃 Вступить", callback_data="esc_join"),
+               InlineKeyboardButton("🚀 Старт", callback_data="esc_start"))
     
-    bot.send_message(chat_id, "🏃‍♂️ **РЕГИСТРАЦИЯ НА ESCAPE**\nНажми «Вступить», а затем Админ нажмет «Старт».", 
-                     parse_mode="Markdown", reply_markup=markup)
+    bot.send_message(chat_id, "🏃‍♂️ **ESCAPE: НАБОР ИГРОКОВ**", parse_mode="Markdown", reply_markup=markup)
 
-def escape_step(chat_id):
+def run_escape_logic(chat_id):
     if chat_id not in active_escapes: return
     game = active_escapes[chat_id]
+    
+    if len(game['players']) <= 1:
+        winner = game['players'][0] if game['players'] else "Никто"
+        bot.send_message(chat_id, f"🏆 **ИГРА ОКОНЧЕНА!**\nПобедитель: {winner}", parse_mode="Markdown")
+        active_escapes.pop(chat_id, None)
+        return
+
+    # Рандомная смерть
+    unlucky = random.choice(game['players'])
+    game['players'].remove(unlucky)
+    
+    bot.send_message(chat_id, f"🚪 **КОМНАТА {game['room']}**\n💀 Игрок {unlucky} не выбрался...", parse_mode="Markdown")
     game['room'] += 1
     
-    # Логика: выживают не все (шанс 70%)
-    survivors = game['survivors']
-    if len(survivors) > 1:
-        still_alive = [u for u in survivors if random.random() > 0.35]
-        game['survivors'] = still_alive
-        
-        dead_count = len(survivors) - len(still_alive)
-        text = f"🚪 **КОМНАТА №{game['room']}**\n━━━━━━━━━━━━\n💀 Ловушка устранила игроков: {dead_count}\n✅ Осталось: {len(still_alive)}"
-        bot.send_message(chat_id, text, parse_mode="Markdown")
-        
-        if len(still_alive) <= 1:
-            winner = f"🏆 ИГРА ОКОНЧЕНА!\nПобедитель: {f'ID {still_alive[0]}' if still_alive else 'Никто'}"
-            bot.send_message(chat_id, winner)
-            active_escapes.pop(chat_id, None)
-        else:
-            threading.Timer(4.0, escape_step, args=(chat_id,)).start()
-    else:
-        active_escapes.pop(chat_id, None)
+    threading.Timer(3.0, run_escape_logic, args=(chat_id,)).start()
 
 # =====================================================================
-#                          ЛОГИКА ДУЭЛИ
+#                          ЛОГИКА ДУЭЛИ (DUEL)
 # =====================================================================
 @bot.message_handler(commands=['duel'])
 def start_duel(message):
@@ -124,10 +115,16 @@ def start_duel(message):
     }
 
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("⚔️ Принять", callback_data="accept_duel"),
+    markup.add(InlineKeyboardButton("⚔️ Принять вызов", callback_data=f"accept_duel"),
                InlineKeyboardButton("🛑 Отмена", callback_data="stop_duel"))
 
-    text = f"⚔️ **ВЫЗОВ ОТ {message.from_user.first_name}**\n3 раунда на кубиках!"
+    text = (
+        f"⚔️ **ВЫЗОВ НА ДУЭЛЬ** ⚔️\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 **{message.from_user.first_name}** вызывает на бой!\n"
+        f"🎯 **3 раунда на кубиках.**\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━"
+    )
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
 @bot.message_handler(content_types=['dice'])
@@ -137,15 +134,18 @@ def handle_dice(message):
     
     duel = active_duels[chat_id]
     user_id = message.from_user.id
-    if duel['status'] != 'fighting' or user_id not in [duel['creator_id'], duel['opponent_id']]: return
-    if user_id in duel['round_rolls']: return
+    if duel['status'] != 'fighting': return
+    if user_id not in [duel['creator_id'], duel['opponent_id']]: return
+    if user_id in duel['round_rolls']:
+        bot.reply_to(message, "второй раз нельзя кидать леее")
+        return
 
     duel['round_rolls'][user_id] = message.dice.value
     if len(duel['round_rolls']) == 2:
         threading.Thread(target=delayed_duel_result, args=(chat_id,)).start()
 
 def delayed_duel_result(chat_id):
-    time.sleep(4)
+    time.sleep(5)
     if chat_id not in active_duels: return
     duel = active_duels[chat_id]
     c_id, o_id = duel['creator_id'], duel['opponent_id']
@@ -154,11 +154,11 @@ def delayed_duel_result(chat_id):
     duel['total_scores'][o_id] = duel['total_scores'].get(o_id, 0) + duel['round_rolls'][o_id]
 
     if duel['round'] == 3:
-        res = f"🏆 **ИТОГ**\n{duel['creator_name']}: {duel['total_scores'][c_id]}\n{duel['opponent_name']}: {duel['total_scores'][o_id]}"
-        bot.send_message(chat_id, res)
+        res = f"🏆 **ИТОГ:** {duel['creator_name']} ({duel['total_scores'][c_id]}) vs {duel['opponent_name']} ({duel['total_scores'][o_id]})"
+        bot.send_message(chat_id, res, parse_mode="Markdown")
         active_duels.pop(chat_id, None)
     else:
-        bot.send_message(chat_id, f"✅ Раунд {duel['round']} завершен! Ждем кубики для раунда {duel['round']+1}")
+        bot.send_message(chat_id, f"🔔 Раунд {duel['round']} завершен! Раунд {duel['round']+1} - КИДАЙТЕ!")
         duel['round'] += 1
         duel['round_rolls'] = {}
 
@@ -168,33 +168,31 @@ def delayed_duel_result(chat_id):
 @bot.callback_query_handler(func=lambda call: True)
 def callbacks(call):
     chat_id = call.message.chat.id
-    uid = call.from_user.id
+    user_id = call.from_user.id
 
-    # Обработка Escape
-    if call.data == "join_esc":
-        if chat_id in active_escapes and uid not in active_escapes[chat_id]['survivors']:
-            active_escapes[chat_id]['survivors'].append(uid)
-            bot.answer_callback_query(call.id, "✅ Ты в игре!")
+    if call.data == "esc_join":
+        if chat_id in active_escapes and call.from_user.first_name not in active_escapes[chat_id]['players']:
+            active_escapes[chat_id]['players'].append(call.from_user.first_name)
+            bot.answer_callback_query(call.id, "✅ Ты зашел!")
             
-    elif call.data == "run_esc":
-        if not is_user_admin(chat_id, uid): return
-        if len(active_escapes[chat_id]['survivors']) < 2:
-            bot.answer_callback_query(call.id, "Минимум 2 игрока!", show_alert=True)
+    elif call.data == "esc_start":
+        if not is_user_admin(chat_id, user_id): return
+        if len(active_escapes[chat_id]['players']) < 2:
+            bot.answer_callback_query(call.id, "Мало людей!", show_alert=True)
             return
-        active_escapes[chat_id]['status'] = 'running'
-        bot.edit_message_text("🚪 Двери закрылись! Выживание началось...", chat_id, call.message.message_id)
-        escape_step(chat_id)
+        active_escapes[chat_id]['status'] = 'playing'
+        bot.edit_message_text("🚪 Игра началась!", chat_id, call.message.message_id)
+        run_escape_logic(chat_id)
 
-    # Обработка Дуэли
     elif call.data == "accept_duel":
         if chat_id in active_duels and active_duels[chat_id]['status'] == 'waiting':
-            if uid == active_duels[chat_id]['creator_id']: return
-            active_duels[chat_id].update({'status': 'fighting', 'opponent_id': uid, 'opponent_name': call.from_user.first_name})
-            bot.edit_message_text("⚔️ **БИТВА!** Кидайте кубики 🎲", chat_id, call.message.message_id, parse_mode="Markdown")
-            
+            if user_id == active_duels[chat_id]['creator_id']: return
+            active_duels[chat_id].update({'status': 'fighting', 'opponent_id': user_id, 'opponent_name': call.from_user.first_name})
+            bot.edit_message_text("⚔️ БИТВА НАЧАЛАСЬ! Кидайте 🎲", chat_id, call.message.message_id)
+
     elif call.data == "stop_duel":
         active_duels.pop(chat_id, None)
-        bot.edit_message_text("❌ Отменено.", chat_id, call.message.message_id)
+        bot.edit_message_text("❌ Отмена.", chat_id, call.message.message_id)
 
 # =====================================================================
 #                          WEBHOOK / RUN
