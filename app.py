@@ -28,7 +28,7 @@ def is_user_admin(chat_id, user_id):
     except: return False
 
 # =====================================================================
-#                          ГЛАВНОЕ МЕНЮ (ДИЗАЙН)
+#                          ГЛАВНОЕ МЕНЮ
 # =====================================================================
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
@@ -81,7 +81,18 @@ def start_duel(message):
     markup.add(InlineKeyboardButton("⚔️ Принять вызов", callback_data=f"accept_duel"),
                InlineKeyboardButton("🛑 Отмена", callback_data="stop_duel"))
 
-    text = f"⚔️ **ВЫЗОВ НА ДУЭЛЬ**\n━━━━━━━━━━━━━━━━━━━━━━\n👤 Инициатор: **{message.from_user.first_name}**\n🎯 Формат: **3 раунда**\n━━━━━━━━━━━━━━━━━━━━━━"
+    # Добавлены правила в шапку
+    text = (
+        f"⚔️ **ВЫЗОВ НА ДУЭЛЬ** ⚔️\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 **{message.from_user.first_name}** вызывает на бой!\n"
+        f"🎯 **3 раунда на кубиках.**\n"
+        f"📜 **ПРАВИЛА:**\n"
+        f"1. Кидайте кубик только в свою очередь.\n"
+        f"2. Победит тот, кто наберет больше очков.\n"
+        f"3. Повторные броски запрещены!\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━"
+    )
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
 @bot.message_handler(content_types=['dice'])
@@ -92,8 +103,15 @@ def handle_dice(message):
     duel = active_duels[chat_id]
     user_id = message.from_user.id
 
-    if duel['status'] != 'fighting' or user_id not in [duel['creator_id'], duel['opponent_id']]: return
-    if user_id in duel['round_rolls']: return
+    if duel['status'] != 'fighting': return
+    
+    # Если кидает левый человек (не участник)
+    if user_id not in [duel['creator_id'], duel['opponent_id']]: return
+
+    # ПРОВЕРКА НА ПОВТОРНЫЙ БРОСОК
+    if user_id in duel['round_rolls']:
+        bot.reply_to(message, "второй раз нельзя кидать леее")
+        return
 
     duel['round_rolls'][user_id] = message.dice.value
 
@@ -101,7 +119,7 @@ def handle_dice(message):
         threading.Thread(target=delayed_duel_result, args=(chat_id,)).start()
 
 def delayed_duel_result(chat_id):
-    time.sleep(5) # Задержка 5 секунд для интриги
+    time.sleep(5) # Задержка 5 секунд
     if chat_id not in active_duels: return
     duel = active_duels[chat_id]
     
@@ -110,7 +128,6 @@ def delayed_duel_result(chat_id):
     duel['total_scores'][o_id] = duel['total_scores'].get(o_id, 0) + duel['round_rolls'][o_id]
 
     if duel['round'] == 3:
-        # ФИНАЛЬНЫЙ ПОДСЧЕТ
         res = (
             f"🏆 **ФИНАЛЬНЫЙ СЧЕТ** 🏆\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -128,15 +145,14 @@ def delayed_duel_result(chat_id):
         bot.send_message(chat_id, res, parse_mode="Markdown")
         active_duels.pop(chat_id, None)
     else:
-        # ИТОГИ ПРОМЕЖУТОЧНОГО РАУНДА
         status = (
             f"📊 **РАУНД {duel['round']} ЗАВЕРШЕН**\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"👤 {duel['creator_name']} выбил: {duel['round_rolls'][c_id]}\n"
-            f"👤 {duel['opponent_name']} выбил: {duel['round_rolls'][o_id]}\n"
+            f"👤 {duel['creator_name']} выбил: **{duel['round_rolls'][c_id]}**\n"
+            f"👤 {duel['opponent_name']} выбил: **{duel['round_rolls'][o_id]}**\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🔔 Текущий счет: **{duel['total_scores'][c_id]}** — **{duel['total_scores'][o_id]}**\n"
-            f"🚀 Переходим к раунду {duel['round'] + 1}!"
+            f"🔔 Общий счет: **{duel['total_scores'][c_id]}** — **{duel['total_scores'][o_id]}**\n"
+            f"🚀 Раунд {duel['round'] + 1}... ПОГНАЛИ!"
         )
         bot.send_message(chat_id, status, parse_mode="Markdown")
         duel['round'] += 1
@@ -157,15 +173,14 @@ def callbacks(call):
             active_duels[chat_id]['opponent_id'] = call.from_user.id
             active_duels[chat_id]['opponent_name'] = call.from_user.first_name
             bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, 
-                                  text="⚔️ **БИТВА НАЧАЛАСЬ!**\n\nБросайте кубики 🎲", parse_mode="Markdown")
+                                  text="⚔️ **БИТВА НАЧАЛАСЬ!**\n\nБросайте кубики 🎲 (Всего 3 раунда)", parse_mode="Markdown")
     
     elif call.data == "stop_duel":
-        # Отменить дуэль может любой участник или админ
         active_duels.pop(chat_id, None)
         bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="❌ Дуэль отменена.")
 
 # =====================================================================
-#                          RUN BOT (WEBHOOK/FLASK)
+#                          WEBHOOK / RUN
 # =====================================================================
 @app.route(f'/{BOT_TOKEN}', methods=['POST'])
 def getMessage():
