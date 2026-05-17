@@ -1,6 +1,5 @@
 import os
 import random
-import time
 import threading
 import telebot
 from flask import Flask, request
@@ -12,6 +11,9 @@ load_dotenv()
 # --- Конфигурация ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
+
+if not BOT_TOKEN:
+    print("ОШИБКА: BOT_TOKEN не найден в переменных окружения!")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
@@ -113,7 +115,6 @@ def escape_round_start(chat_id):
     if chat_id not in active_escapes: return
     game = active_escapes[chat_id]
     
-    # Если осталось 2 или меньше — идем в финал КНБ
     if len(game['players']) <= 2:
         start_knb_final(chat_id)
         return
@@ -145,7 +146,6 @@ def escape_round_results(chat_id):
     if chat_id not in active_escapes: return
     game = active_escapes[chat_id]
     
-    # Авто-выбор для тех, кто не нажал
     for p_id in game['players']:
         if p_id not in game['choices']:
             game['choices'][p_id] = random.randint(1, 3)
@@ -153,7 +153,6 @@ def escape_round_results(chat_id):
     dead_list = []
     door_data = {1: [], 2: [], 3: []}
     
-    # Распределяем по комнатам
     for p_id, door in game['choices'].items():
         name = game['players'][p_id]
         if door == game['dead_door'] and random.random() < 0.65:
@@ -161,7 +160,7 @@ def escape_round_results(chat_id):
         else:
             door_data[door].append(name)
 
-    # УДАЛЯЕМ погибших до формирования списка выживших
+    # Исправленная логика удаления игроков (Олег больше не воскреснет)
     for p_id in dead_list:
         game['players'].pop(p_id, None)
 
@@ -192,7 +191,7 @@ def start_knb_final(chat_id):
     
     if len(game['players']) < 2:
         winner = list(game['players'].values())[0] if game['players'] else "Никто"
-        bot.send_message(chat_id, f"🏆 *ЕДИНСТВЕННЫЙ ВЫЖИВШИЙ И ПОБЕДИТЕЛЬ:* {winner}", parse_mode="Markdown")
+        bot.send_message(chat_id, f"🏆 *ПОБЕДИТЕЛЬ:* {winner}", parse_mode="Markdown")
         active_escapes.pop(chat_id, None)
         return
     
@@ -207,8 +206,7 @@ def start_knb_final(chat_id):
         "🏁 *ФИНАЛЬНАЯ БИТВА (КНБ)*\n"
         f"👤 {n1} ⚔️ {n2}\n"
         "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
-        "Игра до 3-х побед!\n"
-        "Сделайте свой ход кнопкой ниже."
+        "Игра до 3-х побед!"
     )
     bot.send_message(chat_id, text, parse_mode="Markdown")
     next_knb_step(chat_id)
@@ -256,7 +254,7 @@ def process_knb_logic(chat_id):
 def start_duel(message):
     chat_id = message.chat.id
     if chat_id in active_duels:
-        bot.reply_to(message, "❌ В этом чате уже идет дуэль!")
+        bot.reply_to(message, "❌ Дуэль уже идет!")
         return
 
     active_duels[chat_id] = {
@@ -291,7 +289,6 @@ def handle_dice(message):
     user_id = message.from_user.id
     if duel['status'] != 'fighting': return
     if user_id not in [duel['creator_id'], duel['opponent_id']]: return
-    
     if user_id in duel['round_rolls']:
         bot.reply_to(message, "Ты уже бросил кубик!")
         return
@@ -301,7 +298,8 @@ def handle_dice(message):
         threading.Thread(target=delayed_duel_result, args=(chat_id,)).start()
 
 def delayed_duel_result(chat_id):
-    time.sleep(5) # Ждем анимацию кубика
+    import time
+    time.sleep(5) 
     if chat_id not in active_duels: return
     duel = active_duels[chat_id]
     c_id, o_id = duel['creator_id'], duel['opponent_id']
@@ -312,32 +310,14 @@ def delayed_duel_result(chat_id):
     if duel['round'] == 3:
         c_score = duel['total_scores'][c_id]
         o_score = duel['total_scores'][o_id]
-        
-        if c_score > o_score:
-            winner_text = f"👑 ПОБЕДИТЕЛЬ: {duel['creator_name']}"
-        elif o_score > c_score:
-            winner_text = f"👑 ПОБЕДИТЕЛЬ: {duel['opponent_name']}"
-        else:
-            winner_text = "🤝 НИЧЬЯ!"
+        winner = duel['creator_name'] if c_score > o_score else duel['opponent_name']
+        if c_score == o_score: winner = "Ничья"
 
-        res = (
-            f"🏆 *ФИНАЛЬНЫЙ СЧЕТ*\n"
-            f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
-            f"👤 {duel['creator_name']}: {c_score}\n"
-            f"👤 {duel['opponent_name']}: {o_score}\n"
-            f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
-            f"*{winner_text}*"
-        )
+        res = f"🏆 *ИТОГ:* {duel['creator_name']} {c_score} — {o_score} {duel['opponent_name']}\n👑 Победил: {winner}"
         bot.send_message(chat_id, res, parse_mode="Markdown")
         active_duels.pop(chat_id, None)
     else:
-        status = (
-            f"📊 *РАУНД {duel['round']} ОКОНЧЕН*\n"
-            f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
-            f"🔔 Текущий счет: {duel['total_scores'][c_id]} — {duel['total_scores'][o_id]}\n"
-            f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
-            f"🔜 *СЛЕДУЮЩИЙ РАУНД! Бросайте 🎲*"
-        )
+        status = f"📊 *РАУНД {duel['round']} ОКОНЧЕН*\n🔔 Счет: {duel['total_scores'][c_id]} — {duel['total_scores'][o_id]}\n🔜 Бросайте 🎲"
         bot.send_message(chat_id, status, parse_mode="Markdown")
         duel['round'] += 1
         duel['round_rolls'] = {}
@@ -351,7 +331,7 @@ def callbacks(call):
     uid = call.from_user.id
 
     if call.data == "esc_join":
-        if chat_id in active_escapes and active_escapes[chat_id]['status'] == 'registration':
+        if chat_id in active_escapes:
             if uid not in active_escapes[chat_id]['players']:
                 active_escapes[chat_id]['players'][uid] = call.from_user.first_name
                 bot.answer_callback_query(call.id, "Вы вступили!")
@@ -369,34 +349,25 @@ def callbacks(call):
             
     elif call.data.startswith("dr_"):
         if chat_id in active_escapes and active_escapes[chat_id]['status'] == 'choosing':
-            if uid in active_escapes[chat_id]['players']:
-                active_escapes[chat_id]['choices'][uid] = int(call.data.split("_")[1])
-                bot.answer_callback_query(call.id, f"Вы выбрали дверь {call.data.split('_')[1]}")
+            active_escapes[chat_id]['choices'][uid] = int(call.data.split("_")[1])
+            bot.answer_callback_query(call.id, "Принято!")
             
     elif call.data.startswith("k_"):
         if chat_id in active_escapes and active_escapes[chat_id]['status'] == 'knb':
-            if uid in active_escapes[chat_id]['players'] and uid not in active_escapes[chat_id]['knb_moves']:
-                move = call.data.split("_")[1]
-                active_escapes[chat_id]['knb_moves'][uid] = move
-                bot.answer_callback_query(call.id, "Выбор сделан!")
-                if len(active_escapes[chat_id]['knb_moves']) == 2:
-                    process_knb_logic(chat_id)
+            active_escapes[chat_id]['knb_moves'][uid] = call.data.split("_")[1]
+            bot.answer_callback_query(call.id, "Ок!")
+            if len(active_escapes[chat_id]['knb_moves']) == 2:
+                process_knb_logic(chat_id)
 
     elif call.data == "accept_duel":
         if chat_id in active_duels and active_duels[chat_id]['status'] == 'waiting':
-            if uid == active_duels[chat_id]['creator_id']: 
-                bot.answer_callback_query(call.id, "Нельзя играть с самим собой!", show_alert=True)
-                return
+            if uid == active_duels[chat_id]['creator_id']: return
             active_duels[chat_id].update({'status': 'fighting', 'opponent_id': uid, 'opponent_name': call.from_user.first_name})
-            bot.edit_message_text("⚔️ *БИТВА НАЧАЛАСЬ!*\n\nКидайте кубики 🎲", chat_id, call.message.message_id, parse_mode="Markdown")
+            bot.edit_message_text("⚔️ *БИТВА НАЧАЛАСЬ!*", chat_id, call.message.message_id, parse_mode="Markdown")
             
     elif call.data == "stop_duel":
-        if chat_id in active_duels:
-            if uid == active_duels[chat_id]['creator_id'] or is_user_admin(chat_id, uid):
-                active_duels.pop(chat_id, None)
-                bot.edit_message_text("❌ Дуэль отменена.", chat_id, call.message.message_id)
-            else:
-                bot.answer_callback_query(call.id, "Только создатель или админ может отменить.", show_alert=True)
+        active_duels.pop(chat_id, None)
+        bot.edit_message_text("❌ Отменено.", chat_id, call.message.message_id)
 
 # =====================================================================
 #                          WEBHOOK / RUN
@@ -405,21 +376,20 @@ def callbacks(call):
 def getMessage():
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
+        update = Update.de_json(json_string)
         bot.process_new_updates([update])
         return "!", 200
-    else:
-        return "Forbidden", 403
+    return "Forbidden", 403
 
 @app.route("/")
 def index():
-    return "Bot is Online", 200
+    return "Online", 200
 
 if __name__ == "__main__":
-    # Настройка Webhook при старте
+    # Сначала сбрасываем вебхук, потом ставим заново
     bot.remove_webhook()
-    time.sleep(1)
     bot.set_webhook(url=f"{RENDER_EXTERNAL_URL}/{BOT_TOKEN}")
     
-    # Запуск Flask сервера
-    app.run(host="0.0.0.0", port=int(os.environ.get('PORT', 5000)))
+    # Render передает PORT автоматически
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host="0.0.0.0", port=port)
