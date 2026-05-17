@@ -27,7 +27,7 @@ def is_user_admin(chat_id, user_id):
 @bot.message_handler(commands=['escape'])
 def start_escape(message):
     if not is_user_admin(message.chat.id, message.from_user.id):
-        bot.reply_to(message, "❌ Только админ!")
+        bot.reply_to(message, "❌ Только админы могут начать игру.")
         return
     
     active_escapes[message.chat.id] = {
@@ -45,24 +45,16 @@ def start_escape(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith(("esc_", "dr_")))
 def handle_escape_clicks(call):
-    chat_id = call.message.chat.id
-    uid = call.from_user.id
-    
-    if chat_id not in active_escapes:
-        bot.answer_callback_query(call.id, "Игра не активна.")
-        return
-
+    chat_id, uid = call.message.chat.id, call.from_user.id
+    if chat_id not in active_escapes: return
     game = active_escapes[chat_id]
 
     if call.data == "esc_join":
         if uid not in game['players']:
             game['players'][uid] = call.from_user.first_name
-            players_list = "\n".join([f"👤 {name}" for name in game['players'].values()])
-            markup = InlineKeyboardMarkup().add(InlineKeyboardButton("➕ ВСТУПИТЬ", callback_data="esc_join"),
-                                               InlineKeyboardButton("🚀 НАЧАТЬ", callback_data="esc_start"))
-            bot.edit_message_text(f"🎮 *ИГРОКИ:* {len(game['players'])}\n{players_list}", chat_id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
+            bot.answer_callback_query(call.id, "Ты в игре!")
         else:
-            bot.answer_callback_query(call.id, "Ты уже в списке!")
+            bot.answer_callback_query(call.id, "Ты уже вступил.")
 
     elif call.data == "esc_start":
         if is_user_admin(chat_id, uid):
@@ -70,10 +62,10 @@ def handle_escape_clicks(call):
                 bot.delete_message(chat_id, call.message.message_id)
                 escape_round_start(chat_id)
             else:
-                bot.answer_callback_query(call.id, "Минимум 2 игрока!", show_alert=True)
+                bot.answer_callback_query(call.id, "Мало игроков!", show_alert=True)
 
     elif call.data.startswith("dr_"):
-        if uid in game['players']:
+        if uid in game['players'] and game['status'] == 'choosing':
             game['choices'][uid] = int(call.data.split("_")[1])
             bot.answer_callback_query(call.id, f"Выбрана дверь {game['choices'][uid]}")
 
@@ -81,20 +73,14 @@ def escape_round_start(chat_id):
     if chat_id not in active_escapes: return
     game = active_escapes[chat_id]
     
-    # ПРОВЕРКА ПОБЕДИТЕЛЯ
-    count = len(game['players'])
-    if count == 0:
-        bot.send_message(chat_id, "💀 Все погибли. Конец игры.")
-        active_escapes.pop(chat_id, None)
-        return
-    if count == 1:
-        winner = list(game['players'].values())[0]
-        bot.send_message(chat_id, f"🏆 *ЕДИНСТВЕННЫЙ ВЫЖИВШИЙ:* {winner}", parse_mode="Markdown")
+    if len(game['players']) <= 1:
+        winner = list(game['players'].values())[0] if game['players'] else "Никто"
+        bot.send_message(chat_id, f"🏆 *ФИНАЛ*\n👑 Единственный выживший: {winner}", parse_mode="Markdown")
         active_escapes.pop(chat_id, None)
         return
 
     game['status'] = 'choosing'
-    game['choices'] = {} # Очищаем старые ходы!
+    game['choices'] = {} 
     game['dead_door'] = random.randint(1, 3)
     
     players_list = "\n".join([f"👤 {name}" for name in game['players'].values()])
@@ -104,50 +90,44 @@ def escape_round_start(chat_id):
         InlineKeyboardButton("🚪 3", callback_data="dr_3")
     )
     
-    bot.send_message(chat_id, f"🔴 *РАУНД {game['room']}*\n\n{players_list}\n\nУ вас 30 секунд на выбор!", parse_mode="Markdown", reply_markup=markup)
-    
-    # Запускаем таймер завершения раунда
+    bot.send_message(chat_id, f"🔴 *РАУНД {game['room']}*\n\nВ игре:\n{players_list}\n\n📍 Выбирайте дверь! (30 сек)", parse_mode="Markdown", reply_markup=markup)
     threading.Timer(30.0, escape_round_results, args=(chat_id,)).start()
 
 def escape_round_results(chat_id):
     if chat_id not in active_escapes: return
     game = active_escapes[chat_id]
     
-    # Авто-выбор для тех, кто проспал
     for p_id in list(game['players'].keys()):
         if p_id not in game['choices']:
             game['choices'][p_id] = random.randint(1, 3)
 
-    dead_list = []
-    door_data = {1: [], 2: [], 3: []}
+    dead_names = []
+    survived_names = []
     
-    for p_id, door in game['choices'].items():
-        name = game['players'].get(p_id)
-        if not name: continue
-        
-        if door == game['dead_door'] and random.random() < 0.65:
-            dead_list.append(p_id)
+    # Обрабатываем результаты
+    for p_id in list(game['players'].keys()):
+        name = game['players'][p_id]
+        if game['choices'][p_id] == game['dead_door']:
+            dead_names.append(name)
+            game['players'].pop(p_id)
         else:
-            door_data[door].append(name)
+            survived_names.append(name)
 
-    # УДАЛЯЕМ мертвых
-    for p_id in dead_list:
-        game['players'].pop(p_id, None)
-
-    res_text = f"📊 *ИТОГИ РАУНДА {game['room']}*\n\n"
-    for d in range(1, 4):
-        p_str = ", ".join(door_data[d]) if door_data[d] else "Пусто"
-        icon = "💀 ЛОВУШКА" if d == game['dead_door'] else "✅ ОК"
-        res_text += f"🚪 Дверь {d}: {p_str} ({icon})\n"
-
-    survivors = list(game['players'].values())
-    res_text += f"\n💎 *ВЫЖИЛИ:* {', '.join(survivors) if survivors else 'Никто'}"
+    # Формируем короткий отчет
+    res_text = f"📊 *ИТОГИ РАУНДА {game['room']}*\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
     
+    if dead_names:
+        res_text += f"💀 *ПОГИБЛИ:* {', '.join(dead_names)}\n"
+    else:
+        res_text += "💀 *ПОГИБЛИ:* Никто (всем повезло!)\n"
+        
+    res_text += f"💎 *ВЫЖИЛИ:* {', '.join(survived_names) if survived_names else 'Никто'}\n"
+    res_text += "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
+
     bot.send_message(chat_id, res_text, parse_mode="Markdown")
     
-    # Переход к следующему раунду
     game['room'] += 1
-    time.sleep(2) # Небольшая пауза перед следующим раундом
+    time.sleep(3)
     escape_round_start(chat_id)
 
 @app.route(f'/{BOT_TOKEN}', methods=['POST'])
@@ -157,7 +137,7 @@ def getMessage():
 
 @app.route("/")
 def index():
-    return "Bot Online", 200
+    return "Online", 200
 
 if __name__ == "__main__":
     bot.remove_webhook()
